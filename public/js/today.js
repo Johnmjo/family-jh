@@ -117,6 +117,7 @@ function exCard(x, isOpen, idx) {
     const g = x.suggestion;
     strips.push(`<div class="strip blue"><span>${esc(g.label)}${g.confidence === 'hint' && g.weight != null ? `: about ${fmtW(g.weight)} × ${g.reps}` : ''}</span><span class="muted">${esc(g.text)}</span></div>`);
   }
+  if (needsFinder(x)) strips.push(`<div class="strip amber"><span>${x.suggestion && x.suggestion.stale ? "It's been a while on this one." : 'New exercise for you.'}</span><button class="link-btn" data-find="${x.id}" style="padding:0">Find your weight</button></div>`);
   const target = W.isDeload ? 'Deload: light and easy' : `Target: ${repTarget ? `${repTarget} reps at ` : ''}${rirText(W.rir)}`;
   const cur = firstOpen && (firstOpen.weight ?? firstOpen.target_weight);
   const range = firstOpen && firstOpen.range_low != null && firstOpen.kind !== 'warmup' && firstOpen.kind !== 'attempt' ? ` · range ${fmtW(firstOpen.range_low)}–${fmtW(firstOpen.range_high)}` : '';
@@ -469,6 +470,7 @@ function bindWorkout() {
     try {
       if (d.toggle) { const x = W.exercises.find((e) => e.id === Number(d.toggle)); if (x) { if (isOpen(x)) { opened.delete(x.id); closed.add(x.id); } else { closed.delete(x.id); opened.add(x.id); } } draw(); return; }
       if (d.askfb) { const so = W.soreness[d.askfb]; if (so && (await askSoreness(d.askfb, so.checkinId))) draw(); return; }
+      if (d.find) return findWeight(Number(d.find));
       if (d.log) return await logSet(Number(d.log), {});
       if (d.edit) return d.field ? inlineEdit(t, Number(d.edit), d.field) : editSet(Number(d.edit));
       if (d.undo) { const ok = await confirmSheet('Undo this set?', 'It will go back to not logged.', { ok: 'Undo' }); if (ok) { await api.put(`sets/${d.undo}`, { done: false }); await reload(); } return; }
@@ -591,6 +593,7 @@ function exMenu(id) {
       { label: 'Some discomfort', run: () => act(`wex/${id}/action`, { action: 'joint', value: 'some' }) },
       { label: 'Painful (suggest a swap next time)', run: () => act(`wex/${id}/action`, { action: 'joint', value: 'painful' }) },
     ]) },
+    ...(x.model.kind !== 'none' && W.status === 'pending' ? [{ label: 'Find your weight', sub: 'a few quick sets to set your target', icon: 'bolt', info: FINDER_INFO, run: () => findWeight(id) }] : []),
     { label: 'Add a set', icon: 'plus', run: () => act(`wex/${id}/action`, { action: 'addSet' }) },
     { label: 'Rest goal', sub: E.clock(x.rest_goal), icon: 'timer', run: () => restGoalSheet(x) },
     { label: 'Skip remaining sets', icon: 'skip', run: () => act(`wex/${id}/action`, { action: 'skipRest' }) },
@@ -625,6 +628,78 @@ async function addExercise() {
   const e = await pickExercise({ title: 'Add an exercise' });
   if (!e) return;
   try { await api.post(`workouts/${W.id}/exercises`, { exercise_id: e.id, muscle: e.muscle, sets: ctx.settings.startSets }); await reload(); } catch (err) { toast(err.message); }
+}
+
+// ---------- find your weight ----------
+// For an exercise you've never done (or not for 6+ weeks): a few rising sets at the target reps.
+// After each one you say how many more reps you had in the tank; the estimated max from that sets the
+// next weight, until a set lands within 1 rep of this week's RIR. That weight becomes the target.
+const FINDER_INFO = { title: 'Find your weight', html: `<p>A short ramp to find the right weight for an exercise you haven't done, or haven't done in a while.</p>
+  <ol><li>Start light: a weight you're sure you can lift for the target reps.</li>
+  <li>Do the target reps, then say how many more you could have done.</li>
+  <li>The app picks the next weight from that. Rest a minute or two and repeat.</li>
+  <li>Once a set lands close to this week's RIR, that weight becomes your target for the working sets.</li></ol>
+  <p class="sub">These count as warm-ups, not working sets. Usually 2 to 4 steps.</p>` };
+function needsFinder(x) {
+  if (W.status !== 'pending' || W.isDeload || x.model.kind === 'none') return false;
+  const work = x.sets.filter((q) => q.kind !== 'warmup' && q.kind !== 'attempt');
+  if (!work.length || x.sets.some((q) => q.done)) return false;
+  const neverDone = work.every((q) => !q.last);
+  return neverDone || !!(x.suggestion && x.suggestion.stale);
+}
+async function findWeight(id) {
+  const x = W.exercises.find((e) => e.id === id); if (!x) return;
+  const units = ctx.settings.units;
+  const work = x.sets.find((q) => q.kind !== 'warmup' && q.kind !== 'attempt' && !q.done && !q.skipped);
+  if (!work) { toast('No working sets left to set'); return; }
+  const R = work.plan_reps || work.target_reps || 10;
+  const rir = Math.min(W.rir ?? 2, 4);
+  let w = work.target_weight ?? (x.suggestion && x.suggestion.weight) ?? null; // no guess: you pick the first weight
+  if (w != null) w = E.roundLoad(w * 0.8, x.model, 'floor'); // start a bit under the guess
+  for (let step = 1; step <= 5; step++) {
+    const r = await finderStep(x, step, w, R, rir, units);
+    if (!r) { toast('Stopped. Your warm-ups are saved.'); await reload(); return; }
+    try { await api.post(`wex/${id}/action`, { action: 'feeler', weight: r.weight, reps: r.reps }); } catch (e) { toast(e.message); return; }
+    const load = E.effectiveLoad(r.weight, x.model, x.bodyweight) ?? r.weight;
+    const left = Math.min(r.left, 6);
+    let max = E.e1rm(load, r.reps, left);
+    const next = max ? E.fitWeight(max, R, rir, x.model, x.bodyweight) : null;
+    const close = r.reps >= R - 1 && Math.abs(left - rir) <= 1;
+    if (close || step === 5 || next == null) {
+      const final = close ? r.weight : next ?? r.weight;
+      try { await api.post(`wex/${id}/action`, { action: 'setTarget', weight: final, reps: R }); } catch (e) { toast(e.message); return; }
+      await reload();
+      return infoSheet('Your working weight', `<p><b>${fmtW(final)} ${units} × ${R}</b> at ${esc(rirText(W.rir))} is now the target for your working sets.</p><p class="sub">Rest a couple of minutes, then start your first working set.</p>`);
+    }
+    // 5+ or 10+ left only says "a lot", so jump by a set share instead of trusting the estimate
+    w = r.left >= 10 ? E.roundLoad(r.weight * 1.6, x.model, 'floor') : r.left >= 5 ? Math.max(next, E.roundLoad(r.weight * 1.3, x.model, 'floor')) : next;
+    if (w <= r.weight && left > rir) w = E.roundLoad(r.weight * 1.05, x.model, 'ceil'); // had more in the tank: go up at least a step
+    if (w >= r.weight && left < rir) w = E.roundLoad(r.weight * 0.92, x.model, 'floor'); // too hard: come down
+    await reload();
+  }
+}
+function finderStep(x, step, w, R, rir, units) {
+  return new Promise((resolve) => {
+    let picked = false;
+    sheet(`<div class="eyebrow">Find your weight · step ${step}</div><div class="h2">${esc(x.exercise.name)}</div>
+      <p class="sub" style="margin:4px 0 10px">Do <b>${R} reps</b>${step === 1 ? ' with a weight you know is easy' : ''}, then pick how many more you could have done. Aim: ${esc(rirText(W.rir))}.</p>
+      <div class="row" style="gap:8px;margin-bottom:10px"><label class="grow"><div class="q">Weight (${units})</div><input class="input" id="fw" inputmode="decimal" value="${w == null ? '' : fmtW(w)}"></label>
+      <label style="width:90px"><div class="q">Reps</div><input class="input" id="fr" inputmode="numeric" value="${R}"></label></div>
+      <div class="q">Reps left in the tank</div>
+      <div class="seg" data-k="left" style="flex-wrap:wrap">${[0, 1, 2, 3, 4, 5, 10].map((n) => `<button type="button" data-left="${n}">${n === 5 ? '5 to 9' : n === 10 ? '10+' : n}</button>`).join('')}</div>
+      <button class="btn block" style="margin-top:12px" data-finfo>How this works</button>`, {
+      onMount: (el, close) => el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-finfo]')) { infoSheet(FINDER_INFO.title, FINDER_INFO.html); return; }
+        const b = e.target.closest('[data-left]'); if (!b) return;
+        const weight = Number(String(el.querySelector('#fw').value).replace(',', '.'));
+        const reps = Math.round(Number(el.querySelector('#fr').value));
+        if (!(weight >= 0) || el.querySelector('#fw').value === '') { toast('Enter the weight'); return; }
+        if (!(reps > 0)) { toast('Enter the reps'); return; }
+        picked = true; close(); resolve({ weight, reps, left: Number(b.dataset.left) });
+      }),
+      onClose: () => { if (!picked) resolve(null); },
+    });
+  });
 }
 
 // ---------- Test 1RM ----------

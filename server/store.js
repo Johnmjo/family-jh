@@ -301,7 +301,7 @@ function addWex(user, workoutId, pos, e, muscle, sets, rir, start, restGoal) {
   for (let i = 0; i < sets; i++) ins.run(xid, i, 'regular', weight, reps, range ? range[0] : null, range ? range[1] : null);
   return xid;
 }
-const cleanSug = (g) => ({ label: g.label, text: g.text, confidence: g.confidence, weight: g.weight, reps: g.reps, from: g.from });
+const cleanSug = (g) => ({ label: g.label, text: g.text, confidence: g.confidence, weight: g.weight, reps: g.reps, from: g.from, stale: !!g.ageNote });
 
 // When a finished workout changes, next week's copy of that day may already be built from the old
 // numbers. If nothing in it has been logged yet, throw it away so it is rebuilt on open.
@@ -654,6 +654,23 @@ function wexAction(user, id, b) {
     } else if (act === 'note') {
       const t = str(b.text, 500); if (!t) throw new Bad('Write a note first');
       db.prepare('INSERT INTO notes(user_id,scope,ref_id,text,pinned,created_at) VALUES(?,?,?,?,?,?)').run(user.id, b.pinned ? 'exercise' : 'wex', b.pinned ? x.exercise_id : id, t, b.pinned ? 1 : 0, now());
+    } else if (act === 'feeler') {
+      // a "find your weight" step: logged as a warm-up set just above the first working set
+      const w = num(b.weight); const r = Math.round(num(b.reps));
+      if (!(r > 0) || r > 100) throw new Bad('Enter the reps');
+      if (w != null && (w < 0 || w > 2000)) throw new Bad('Check the weight');
+      const first = db.prepare(`SELECT pos FROM sets WHERE wex_id=? AND kind IN ${WORKING} AND done=0 AND skipped=0 ORDER BY pos LIMIT 1`).get(id);
+      const at = first ? first.pos : (db.prepare('SELECT COALESCE(MAX(pos),-1)+1 p FROM sets WHERE wex_id=?').get(id).p);
+      db.prepare('UPDATE sets SET pos=pos+1 WHERE wex_id=? AND pos>=?').run(id, at);
+      db.prepare("INSERT INTO sets(wex_id,pos,kind,weight,reps,done,logged_at) VALUES(?,?,'warmup',?,?,1,?)").run(id, at, w, r, now());
+    } else if (act === 'setTarget') {
+      // the weight a "find your weight" sequence landed on becomes the target for the unlogged working sets
+      const e = exercise(user, x.exercise_id); const model = E.loadModel(e.equipment, settingsOf(user));
+      const w = num(b.weight); const r = Math.round(num(b.reps));
+      if (w == null || w < 0 || w > 2000 || !(r > 0)) throw new Bad('Check the weight and reps');
+      const range = E.targetRange(w, model);
+      db.prepare(`UPDATE sets SET target_weight=?, target_reps=?, range_low=?, range_high=?, weight=NULL, reps=NULL WHERE wex_id=? AND done=0 AND skipped=0 AND kind IN ${WORKING}`)
+        .run(w, r, range ? range[0] : null, range ? range[1] : null, id);
     } else if (act === 'plan1rm') {
       db.prepare('UPDATE wex SET plan_1rm=? WHERE id=?').run(b.value ? 1 : 0, id);
     } else throw new Bad('Unknown action');

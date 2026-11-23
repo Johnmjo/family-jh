@@ -236,3 +236,6 @@ textarea.input { height: auto; min-height: 80px; padding: 10px 12px; }
 .recap-stat .n small { font-size: 13px; font-weight: 700; color: var(--muted); }
 .recap-stat .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .recap-stat .t-up { color: #22c55e; } .recap-stat .t-flat { color: var(--muted); } .recap-stat .t-down { color: #ef4444; }
+.strip.amber { background: color-mix(in srgb, #f59e0b 14%, var(--card)); color: #fcd34d; justify-content: space-between; }
+[data-theme="light"] .strip.amber { color: #b45309; }
+.strip.amber .link-btn { color: inherit; font-weight: 800; text-decoration: underline; }
