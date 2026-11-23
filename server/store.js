@@ -430,11 +430,12 @@ function workoutView(user, id) {
         const l = isWork ? last[wi++] || null : null;
         // a different weight than planned: the rep target follows, at the same effort
         let adj = null;
-        if (isWork && !t.done && !t.skipped && t.reps == null && t.weight != null && t.target_weight != null && t.target_reps && t.weight !== t.target_weight) {
+        const echo = !t.done && t.reps != null && t.reps === t.target_reps; // reps saved as a copy of the plan
+        if (isWork && !t.done && !t.skipped && (t.reps == null || echo) && t.weight != null && t.target_weight != null && t.target_reps && t.weight !== t.target_weight) {
           adj = E.repsAt({ weight: t.target_weight, reps: t.target_reps }, t.weight, rirs[w.week - 1], model, bw);
         }
         return {
-          ...t, last: l, plan_reps: t.target_reps, target_reps: adj ?? t.target_reps, adjusted: adj != null && adj !== t.target_reps,
+          ...t, reps: adj != null && echo ? null : t.reps, last: l, plan_reps: t.target_reps, target_reps: adj ?? t.target_reps, adjusted: adj != null && adj !== t.target_reps,
           trend: t.done && l && isWork ? E.trend(l, { weight: t.weight, reps: t.reps }, model, bw) : null,
           plates: model.kind === 'plates' && (t.weight ?? t.target_weight) != null ? E.platesPerSide(t.weight ?? t.target_weight, model) : null,
         };
@@ -491,7 +492,9 @@ function updateSet(user, id, b) {
   touchWorkout(user, st.workout_id);
   const s = settingsOf(user);
   const weight = b.weight !== undefined ? num(b.weight) : st.weight;
-  const reps = b.reps !== undefined ? (num(b.reps) == null ? null : Math.max(0, Math.min(200, Math.round(num(b.reps))))) : st.reps;
+  let reps = b.reps !== undefined ? (num(b.reps) == null ? null : Math.max(0, Math.min(200, Math.round(num(b.reps))))) : st.reps;
+  // A weight change on an unlogged set whose reps only echo the plan clears them, so the rep target follows the new weight
+  if (b.weight !== undefined && b.reps === undefined && !st.done && reps != null && reps === st.target_reps) reps = null;
   if (weight != null && (weight < 0 || weight > 2000)) throw new Bad('Check the weight');
   let done = b.done !== undefined ? (b.done ? 1 : 0) : st.done;
   if (done && (reps == null || (reps < 1 && st.kind !== 'attempt'))) throw new Bad('Enter the reps first');

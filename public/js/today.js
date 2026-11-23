@@ -312,10 +312,11 @@ function editSet(id, field = null) {
       if (field === 'w' && ew) setTimeout(() => { ew.focus(); ew.select(); }, 50);
       const wVal = () => (noW ? null : ew ? (ew.value === '' ? null : Number(ew.value)) : w);
       const rVal = () => (er ? (er.value === '' ? null : Math.round(Number(er.value))) : r);
-      const vals = () => {
+      const vals = (logging) => {
         if (field === 'w') return { weight: wVal() }; // reps stay as they were (an unlogged target follows the weight)
         if (field === 'r') return { reps: rVal() };
-        return { weight: wVal(), reps: rVal() };
+        // an unlogged set keeps no reps until you choose them, so the target keeps following the weight
+        return !logging && !s.done && !repsTouched ? { weight: wVal() } : { weight: wVal(), reps: rVal() };
       };
       el.querySelector('[data-save]').onclick = async () => {
         const v = vals();
@@ -324,7 +325,7 @@ function editSet(id, field = null) {
       };
       const lg = el.querySelector('[data-logit]');
       if (lg) lg.onclick = async () => {
-        const v = vals();
+        const v = vals(true);
         if (v.reps == null || (v.reps < 1 && s.kind !== 'attempt')) { toast('Enter the reps'); return; }
         close();
         try { if (s.done) { await api.put(`sets/${id}`, v); await reload(); } else await logSet(id, v); } catch (e) { toast(e.message); }

@@ -116,6 +116,13 @@ test('auto-match, skip, export, delete', () => {
   S.updateSet(U(), x.sets[0].id, { weight: 190 });
   const w2 = S.workoutView(U(), w.id);
   assert.equal(w2.exercises[0].sets[1].weight, 190);
+  // reps that only echo the plan (saved by an older edit sheet) still follow a new weight
+  const s1 = w2.exercises[0].sets[1];
+  S.updateSet(U(), s1.id, { weight: s1.weight, reps: s1.plan_reps });
+  S.updateSet(U(), s1.id, { weight: s1.weight + 10 });
+  const s1b = S.workoutView(U(), w.id).exercises[0].sets[1];
+  assert.equal(s1b.reps, null);
+  assert.ok(s1b.target_reps < s1.plan_reps);
   const dump = S.exportAll(U());
   assert.ok(dump.mesos.length >= 3);
   assert.throws(() => S.deleteAll(U(), 'nope'));
