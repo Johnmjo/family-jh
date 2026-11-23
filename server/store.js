@@ -139,7 +139,7 @@ function sessionsFor(user, exerciseId, { beforeWorkout = null, limit = 12 } = {}
       by.set(r.wid, { workoutId: r.wid, date: r.logged_at, rir: Math.min(rirs[r.week - 1] ?? 2, 4), bodyweight: r.bodyweight, sets: [] });
     }
     const s = by.get(r.wid);
-    s.sets.push({ weight: r.weight, reps: r.reps, rir: s.rir, pos: r.pos });
+    s.sets.push({ weight: r.weight, reps: r.reps, rir: s.rir, pos: r.pos, kind: r.kind });
   }
   for (const s of by.values()) s.sets.sort((a, b) => a.pos - b.pos);
   return [...by.values()];
@@ -526,8 +526,8 @@ function checkPR(user, exerciseId, setId) {
     if (cur.weight > best) out.push(`New tested 1RM: ${cur.weight}`);
   }
   if (cur.weight > Math.max(...prior.map((p) => p.weight))) out.push(`Heaviest ever: ${cur.weight}`);
-  const e = E.e1rm(cur.weight, cur.reps); const pe = Math.max(...prior.map((p) => E.e1rm(p.weight, p.reps) || 0));
-  if (e > pe * 1.001) out.push(`Best estimated 1RM: ${Math.round(e)}`);
+  const e = E.isMyo(cur) ? 0 : E.e1rm(cur.weight, cur.reps); const pe = Math.max(0, ...prior.filter((p) => !E.isMyo(p)).map((p) => E.e1rm(p.weight, p.reps) || 0));
+  if (e && e > pe * 1.001) out.push(`Best estimated 1RM: ${Math.round(e)}`);
   const sameW = prior.filter((p) => p.weight === cur.weight);
   if (sameW.length && cur.reps > Math.max(...sameW.map((p) => p.reps))) out.push(`Most reps at ${cur.weight}: ${cur.reps}`);
   return out.length ? out : null;
@@ -595,7 +595,7 @@ function expectedMax(user, exerciseId) {
   const model = E.loadModel(e.equipment, s);
   const ss = sessionsFor(user, e.id, { limit: 3 });
   const v = E.expected1RM(ss, model, latestBodyweight(user));
-  const top = ss[0] ? ss[0].sets.reduce((a, b) => ((E.e1rm(b.weight, b.reps, b.rir) || 0) > (E.e1rm(a.weight, a.reps, a.rir) || 0) ? b : a)) : null;
+  const top = ss[0] && ss[0].sets.some((q) => !E.isMyo(q)) ? ss[0].sets.filter((q) => !E.isMyo(q)).reduce((a, b) => ((E.e1rm(b.weight, b.reps, b.rir) || 0) > (E.e1rm(a.weight, a.reps, a.rir) || 0) ? b : a)) : null;
   return { expected: v, basis: top ? { ...top, date: ss[0].date } : null, ramp: v ? E.ramp(v, model, s.ramp) : null };
 }
 function rampPreview(user, exerciseId, expected, includeOptional) {
@@ -754,10 +754,10 @@ function mesoSummary(user, id) {
     JOIN exercises e ON e.id=x.exercise_id JOIN sets s ON s.wex_id=x.id WHERE w.meso_id=? AND s.done=1 AND s.kind<>'warmup' AND s.reps>0 ORDER BY w.week`).all(id);
   const best = {};
   for (const r of ex) {
-    const e1 = E.e1rm(r.weight, r.reps) || 0;
+    const e1 = E.isMyo(r) ? 0 : E.e1rm(r.weight, r.reps) || 0;
     const b = best[r.exercise_id] || (best[r.exercise_id] = { name: r.name, first: null, best: null, weeks: {} });
     if (!b.first) b.first = r;
-    if (!b.best || e1 > (E.e1rm(b.best.weight, b.best.reps) || 0)) b.best = r;
+    if (e1 && (!b.best || e1 > (E.e1rm(b.best.weight, b.best.reps) || 0))) b.best = r;
     (b.weeks[r.week] = b.weeks[r.week] || []).push(`${r.weight ?? 'BW'}×${r.reps}`);
   }
   const totalSets = ex.filter((r) => r.kind !== 'attempt').length;
@@ -847,7 +847,7 @@ function copyPreview(user, id, week) {
         const e = exercise(user, exId);
         const model = E.loadModel(e.equipment, s);
         const sets = db.prepare(`SELECT * FROM sets WHERE wex_id=? AND done=1 AND kind IN ${WORKING} AND reps>0 ORDER BY pos`).all(x.id);
-        const top = sets.reduce((a, b) => (!a || (E.e1rm(E.effectiveLoad(b.weight, model, bw) || 0, b.reps) || 0) > (E.e1rm(E.effectiveLoad(a.weight, model, bw) || 0, a.reps) || 0) ? b : a), null);
+        const top = sets.filter((q) => !E.isMyo(q)).reduce((a, b) => (!a || (E.e1rm(E.effectiveLoad(b.weight, model, bw) || 0, b.reps) || 0) > (E.e1rm(E.effectiveLoad(a.weight, model, bw) || 0, a.reps) || 0) ? b : a), null);
         let start = null;
         if (top && exId === x.exercise_id) {
           const c = E.copyStart({ weight: top.weight, reps: top.reps }, Math.min(rirs[wk - 1] ?? 2, 4), newRir, model, bw);
@@ -942,7 +942,7 @@ function exerciseDetail(user, id) {
   // estimated 1RM over time (best per session)
   const chart = groups.map((g) => {
     let best = 0;
-    for (const t of g.sets) if (t.kind !== 'warmup' && t.reps > 0) best = Math.max(best, E.e1rm(E.effectiveLoad(t.weight, model, bw), t.reps) || 0);
+    for (const t of g.sets) if (t.kind !== 'warmup' && !E.isMyo(t) && t.reps > 0) best = Math.max(best, E.e1rm(E.effectiveLoad(t.weight, model, bw), t.reps) || 0);
     return { date: g.date, e1rm: Math.round(best * 10) / 10 };
   }).filter((p) => p.e1rm > 0).reverse();
   const work = rows.filter((r) => r.kind !== 'warmup' && r.reps > 0);
@@ -982,7 +982,7 @@ function progress(user) {
   for (const r of rows) {
     const model = E.loadModel(r.equipment, s);
     const b = by[r.exercise_id] || (by[r.exercise_id] = { id: r.exercise_id, name: r.name, equipment: r.equipment, sessions: 0, last: 0, heaviest: null, e1rm: null, tested: null, recent: [] });
-    const e1 = E.e1rm(E.effectiveLoad(r.weight, model, bw), r.reps) || 0;
+    const e1 = E.isMyo(r) ? 0 : E.e1rm(E.effectiveLoad(r.weight, model, bw), r.reps) || 0;
     if (r.weight != null && (b.heaviest == null || r.weight > b.heaviest.weight)) { b.heaviest = { weight: r.weight, reps: r.reps, at: r.logged_at }; b.recent.push({ type: 'Heaviest', text: `${r.weight} ${s.units} × ${r.reps}`, at: r.logged_at }); }
     if (e1 && (b.e1rm == null || e1 > b.e1rm.value * 1.001)) { b.e1rm = { value: Math.round(e1), at: r.logged_at }; }
     if (r.kind === 'attempt' && r.result === 'made' && (b.tested == null || r.weight > b.tested.weight)) { b.tested = { weight: r.weight, at: r.logged_at }; b.recent.push({ type: 'Tested 1RM', text: `${r.weight} ${s.units}`, at: r.logged_at }); }
