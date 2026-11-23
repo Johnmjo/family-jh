@@ -108,9 +108,6 @@ function exCard(x, isOpen, idx) {
   const repTarget = x.sets.find((s) => s.kind !== 'warmup' && s.target_reps)?.target_reps;
   const strips = [];
   if (x.pinned.length) strips.push(...x.pinned.map((n) => `<div class="pinned">${icon('note', 14)} ${esc(n.text)}</div>`));
-  const sore = W.soreness[x.muscle];
-  const firstOfMuscle = W.exercises.find((e) => e.muscle === x.muscle) === x;
-  if (sore && !sore.answer && firstOfMuscle && !x.sets.some((s) => s.done)) strips.push(sorenessCard(x.muscle, sore.checkinId));
   if (x.joint_pain === 'flagged' || x.joint_pain === 'painful') strips.push(`<div class="strip red">${icon('flame', 14)} Joints hurt on this last time. Consider a swap. <button class="link-btn" data-replace="${x.id}" style="padding:0">Replace</button></div>`);
   if (x.suggestion && x.suggestion.text && !x.sets.some((s) => s.done)) {
     const g = x.suggestion;
@@ -168,6 +165,33 @@ function checkinCard(muscle, prev) {
     <div class="q">Joints</div>${seg('joints', [['fine', 'Fine'], ['some', 'Some discomfort'], ['painful', 'Painful']])}
     <button class="btn primary block" style="margin-top:10px" data-savecheck="${esc(muscle)}">Save check-in</button></div>`;
 }
+// Asked as a pop-up when you log the first set for a muscle in this workout. Resolves when answered
+// or dismissed, so logging carries on either way.
+function askSoreness(muscle, checkinId) {
+  return new Promise((resolve) => {
+    let picked = false;
+    sheet(`<div class="eyebrow">${esc(muscle)}</div><div class="h2">How's your ${esc(muscle.toLowerCase())} from last time?</div>
+      <p class="sub" style="margin:4px 0 12px">Soreness since your last ${esc(muscle.toLowerCase())} session. It helps set next week's sets.</p>
+      <div class="menu">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button data-sv="${v}"><span>${l}</span></button>`).join('')}</div>
+      <button class="btn block" style="margin-top:8px" data-sskip>Skip</button>`, {
+      onMount: (el, close) => el.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-sv], [data-sskip]'); if (!b) return;
+        if (b.dataset.sv) {
+          picked = true; close();
+          try { await api.queued('POST', `checkins/${checkinId}/soreness`, { value: b.dataset.sv }); if (W.soreness[muscle]) W.soreness[muscle].answer = b.dataset.sv; } catch (err) { toast(err.message); }
+          resolve(true);
+        } else close();
+      }),
+      onClose: () => { if (!picked) { if (W.soreness[muscle]) W.soreness[muscle].asked = true; resolve(false); } },
+    });
+  });
+}
+function needsSoreness(x) {
+  const sore = W.soreness && W.soreness[x.muscle];
+  if (!sore || sore.answer || sore.asked) return null;
+  const started = W.exercises.some((e) => e.muscle === x.muscle && e.sets.some((q) => q.done));
+  return started ? null : sore;
+}
 function sorenessCard(muscle, checkinId) {
   return `<div class="check" style="margin-top:6px"><h3>How's your ${esc(muscle.toLowerCase())} from last time?</h3>
     <div class="seg" data-sore="${checkinId}">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button type="button" data-v="${v}">${l}</button>`).join('')}</div></div>`;
@@ -208,6 +232,8 @@ async function logSet(id, values) {
   const reps = values.reps !== undefined ? values.reps : (s.reps ?? s.target_reps);
   if (reps == null) return editSet(id);
   if (x.model.kind !== 'none' && weight == null) return editSet(id);
+  const sore = needsSoreness(x);
+  if (sore) await askSoreness(x.muscle, sore.checkinId);
   const at = Date.now();
   const res = await api.queued('PUT', `sets/${id}`, { weight: x.model.kind === 'none' ? null : weight, reps, done: true, at });
   if (res.queued) {
