@@ -363,6 +363,11 @@ function inlineEdit(btn, id, field) {
     if (finished) return; finished = true;
     const raw = inp.value.trim().replace(',', '.');
     window.__jhKeepScroll = true;
+    // clearing your own reps on an unlogged set brings the recommended target back
+    if (save && raw === '' && field === 'r' && !s.done && s.reps != null) {
+      try { const res = await api.queued('PUT', `sets/${id}`, { reps: null }); if (res && res.queued) { s.reps = null; draw(); return; } window.__jhKeepScroll = true; await reload(); } catch (e) { toast(e.message); draw(); }
+      return;
+    }
     if (!save || raw === '' || raw === (cur == null ? '' : field === 'w' ? fmtW(cur) : String(cur))) { draw(); return; }
     const v = Number(raw);
     if (!isFinite(v) || v < 0) { toast(field === 'w' ? 'Check the weight' : 'Check the reps'); draw(); return; }
