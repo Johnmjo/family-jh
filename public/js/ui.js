@@ -129,7 +129,7 @@ export function confirmSheet(title, text, { ok = 'OK', danger = false, typeToCon
       onMount: (el, close) => {
         el.querySelector('[data-no]').onclick = () => close();
         el.querySelector('[data-ok]').onclick = () => {
-          if (typeToConfirm && el.querySelector('#cf').value.trim() !== typeToConfirm) { toast(`Type ${typeToConfirm} to confirm`); return; }
+          if (typeToConfirm && el.querySelector('#cf').value.trim().toLowerCase() !== typeToConfirm.toLowerCase()) { toast(`Type ${typeToConfirm} to confirm`); return; }
           done = true; close(); resolve(typeToConfirm ? el.querySelector('#cf').value.trim() : true);
         };
       },
