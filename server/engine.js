@@ -137,6 +137,7 @@
 
   // ---------- strength estimates ----------
   // Estimated 1-rep max (Epley), counting reps left in reserve as reps you could have done.
+  const isMyo = (st) => !!st && (st.kind === 'myo' || st.kind === 'myomatch');
   function e1rm(weight, reps, rir = 0) {
     const n = Number(reps) + Number(rir || 0);
     if (!(weight > 0) || !(n > 0)) return null;
@@ -273,6 +274,7 @@
     use.forEach((s, i) => {
       let best = null; let top = null;
       for (const st of s.sets) {
+        if (isMyo(st)) continue; // a myo total isn't one straight set, so it can't estimate a max
         const load = effectiveLoad(st.weight, model, bodyweight);
         const e = e1rm(load, st.reps, st.rir || 0);
         if (e && (best == null || e > best)) { best = e; top = st; }
@@ -381,7 +383,7 @@
   };
 
   return {
-    DEFAULT_SETTINGS, DEFAULT_RAMP, loadModel, roundLoad, platesPerSide, platesText, e1rm, weightFor, effectiveLoad,
+    DEFAULT_SETTINGS, DEFAULT_RAMP, isMyo, loadModel, roundLoad, platesPerSide, platesText, e1rm, weightFor, effectiveLoad,
     rirSchedule, repsAt, nextTarget, deloadTarget, targetRange, setsDelta, applySetsDelta, trend, historyMax, ageFactor,
     fitWeight, suggestFromHistory, suggestFromSimilar, copyStart, expected1RM, ramp, nextAttempt, restState, clock,
   };

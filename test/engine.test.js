@@ -154,3 +154,9 @@ test('QA v1 fixes: deload always drops, ranges have width', () => {
   const r = E.targetRange(20, dbm); assert.ok(r[0] < 20 && r[1] > 20);
   const k = E.targetRange(10, E.loadModel('Dumbbell', E.DEFAULT_SETTINGS.kg)); assert.ok(k[0] < 10 && k[1] > 10);
 });
+
+test('myo-reps totals do not count toward an estimated max', () => {
+  const model = E.loadModel('barbell', E.DEFAULT_SETTINGS.lb);
+  const v = E.expected1RM([{ date: 1, rir: 0, sets: [{ weight: 155, reps: 20, kind: 'myo' }, { weight: 205, reps: 6, kind: 'regular' }] }], model, null);
+  assert.ok(v < 250, `got ${v}`);
+});
