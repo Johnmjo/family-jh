@@ -177,7 +177,7 @@ function askSoreness(muscle, checkinId) {
     let picked = false;
     sheet(`<div class="eyebrow">${esc(muscle)}</div><div class="h2">How's your ${esc(muscle.toLowerCase())} from last time?</div>
       <p class="sub" style="margin:4px 0 12px">Soreness since your last ${esc(muscle.toLowerCase())} session. It helps set next week's sets.</p>
-      <div class="menu">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button data-sv="${v}"><span>${l}</span></button>`).join('')}</div>`, {
+      <div class="menu">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button data-sv="${v}"><span>${l}</span>${W.soreness[muscle] && W.soreness[muscle].answer === v ? '<small>current</small>' : ''}</button>`).join('')}</div>`, {
       onMount: (el, close) => el.addEventListener('click', async (e) => {
         const b = e.target.closest('[data-sv]'); if (!b) return;
         if (b.dataset.sv) {
@@ -192,8 +192,9 @@ function askSoreness(muscle, checkinId) {
 }
 function needsSoreness(x) {
   const sore = W.soreness && W.soreness[x.muscle];
-  if (!sore || sore.answer) return null;
-  return sore;
+  if (!sore) return null;
+  // the muscle's first logged set always asks (even again after un-logging it); later sets only if it's unanswered
+  return !muscleStarted(x.muscle) || !sore.answer ? sore : null;
 }
 // After the first set of a muscle is logged, an unanswered soreness question blocks that muscle's other sets
 const muscleStarted = (muscle) => W.exercises.some((e) => e.muscle === muscle && e.sets.some((q) => q.done));

@@ -464,7 +464,18 @@ function workoutView(user, id) {
       const c = db.prepare(`SELECT c.* FROM checkins c JOIN workouts o ON o.id=c.workout_id JOIN meso_days d ON d.id=o.day_id
         WHERE o.meso_id=? AND c.muscle=? AND o.id<>? AND (o.week < ? OR (o.week = ? AND d.pos < (SELECT pos FROM meso_days WHERE id=?)))
         ORDER BY o.week DESC, d.pos DESC LIMIT 1`).get(w.meso_id, mus, w.id, w.week, w.week, w.day_id);
-      if (c) soreness[mus] = { checkinId: c.id, answer: c.soreness };
+      if (c) { soreness[mus] = { checkinId: c.id, answer: c.soreness }; continue; }
+      // first time this muscle comes up in the meso: ask about its last session in an earlier meso
+      const prev = db.prepare(`SELECT o.id FROM workouts o JOIN mesos pm ON pm.id=o.meso_id JOIN wex x ON x.workout_id=o.id
+        WHERE pm.user_id=? AND pm.id<>? AND o.status='done' AND x.muscle=? AND x.removed=0
+        ORDER BY COALESCE(o.finished_at, o.started_at, 0) DESC, o.week DESC, o.id DESC LIMIT 1`).get(m.user_id, w.meso_id, mus);
+      if (!prev) continue; // never trained before: nothing to be sore from
+      let pc = db.prepare('SELECT * FROM checkins WHERE workout_id=? AND muscle=?').get(prev.id, mus);
+      if (!pc) {
+        db.prepare('INSERT OR IGNORE INTO checkins (workout_id, muscle, created_at) VALUES (?,?,?)').run(prev.id, mus, now());
+        pc = db.prepare('SELECT * FROM checkins WHERE workout_id=? AND muscle=?').get(prev.id, mus);
+      }
+      soreness[mus] = { checkinId: pc.id, answer: pc.soreness };
     }
   }
   const logged = db.prepare('SELECT MIN(s.logged_at) first, MAX(s.logged_at) last FROM sets s JOIN wex x ON x.id=s.wex_id WHERE x.workout_id=? AND s.done=1').get(w.id);
