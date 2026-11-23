@@ -108,10 +108,13 @@ export function sheet(html, { onMount, onClose } = {}) {
 export const closeSheets = () => { for (const s of [...sheetStack]) s.close(); };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheetStack.length) sheetStack[sheetStack.length - 1].close(); });
 // A menu sheet: items [{ label, sub, danger, group, run }]
+// An item can carry info: { title, html } to show an (i) button that explains it without picking it.
 export function menu(title, items) {
-  const html = `${title ? `<div class="h2" style="margin-bottom:4px">${title}</div>` : ''}<div class="menu">${items.map((it, i) => (it.group ? `<div class="group">${esc(it.group)}</div>` : `<button data-i="${i}" class="${it.danger ? 'danger' : ''}">${it.icon ? icon(it.icon, 20) : ''}<span>${esc(it.label)}</span>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</button>`)).join('')}</div>`;
+  const html = `${title ? `<div class="h2" style="margin-bottom:4px">${title}</div>` : ''}<div class="menu">${items.map((it, i) => (it.group ? `<div class="group">${esc(it.group)}</div>` : `<div class="menu-row"><button data-i="${i}" class="${it.danger ? 'danger' : ''}">${it.icon ? icon(it.icon, 20) : ''}<span>${esc(it.label)}</span>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</button>${it.info ? `<button class="info-btn" data-info="${i}" aria-label="What is ${esc(it.label)}?">${icon('info', 20, 2.2)}</button>` : ''}</div>`)).join('')}</div>`;
   return sheet(html, {
     onMount: (el, close) => el.addEventListener('click', (e) => {
+      const inf = e.target.closest('button[data-info]');
+      if (inf) { const it = items[Number(inf.dataset.info)]; infoSheet(it.info.title, it.info.html); return; }
       const b = e.target.closest('button[data-i]'); if (!b) return;
       const it = items[Number(b.dataset.i)]; close(); if (it.run) it.run();
     }),
@@ -225,3 +228,11 @@ export function chime() {
 }
 // iOS needs a user tap before audio can play later
 document.addEventListener('pointerdown', () => { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch { /* ignore */ } }, { once: true });
+
+// A short explainer sheet. html is trusted app text.
+export function infoSheet(title, html) {
+  return sheet(`<div class="eyebrow">What's this?</div><div class="h2">${esc(title)}</div><div class="info-body">${html}</div>
+    <button class="btn primary block" style="margin-top:14px" data-ok>Got it</button>`, {
+    onMount: (el, close) => { el.querySelector('[data-ok]').onclick = close; },
+  });
+}
