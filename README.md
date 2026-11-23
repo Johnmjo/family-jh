@@ -6,6 +6,7 @@ A private workout logger for each family member, replacing RP Hypertrophy. Serve
 - Plates per side are calculated from the plates you own. Rest timer with a chime. Test 1RM warm-up ramp. Suggested starting weights from your history, or from similar exercises.
 - 299 built-in exercises with how-to notes, 115 templates, a meso builder, copy meso, progress charts and data export.
 - Everyone's training is private. Each signed-in family email gets its own space.
+- Import your RP Hypertrophy history from Settings (the export .zip or .json). Re-importing skips mesos already there, and an unfinished RP meso carries on as your current one.
 
 ## Run locally
 

@@ -5,6 +5,7 @@ const express = require('express');
 const { db } = require('./db');
 const auth = require('./auth');
 const store = require('./store');
+const rpimport = require('./rpimport');
 
 const PORT = Number(process.env.PORT || 8086);
 const HUB_URL = process.env.HUB_URL ?? 'https://johnjonesfam.com/';
@@ -48,7 +49,9 @@ r.use('/api', (req, res, next) => {
   if (req.method !== 'DELETE' && !req.is('application/json')) return res.status(415).json({ error: 'Send JSON' });
   next();
 });
-r.use(express.json({ limit: '5mb' }));
+const smallJson = express.json({ limit: '5mb' });
+const bigJson = express.json({ limit: '60mb' }); // RP history imports
+r.use((req, res, next) => (req.path.startsWith('/api/import/') ? bigJson : smallJson)(req, res, next));
 
 const INDEX = fs.readFileSync(path.join(PUB, 'index.html'), 'utf8').replaceAll('__V__', `v/${ASSET_VER}/`);
 const page = (req, res) => res.set('Cache-Control', 'no-cache').type('html').send(INDEX.replace('__BASE__', `${req.baseUrl}/`).replace('__HUB__', HUB_URL));
@@ -122,6 +125,8 @@ r.get('/api/export', (req, res) => {
   const data = store.exportAll(me(req));
   res.set('Content-Disposition', `attachment; filename="jh-export-${new Date().toISOString().slice(0, 10)}.json"`).json(data);
 });
+r.post('/api/import/rp/preview', wrap((req) => ({ preview: rpimport.preview(me(req), req.body && req.body.data) })));
+r.post('/api/import/rp', wrap((req) => ({ result: rpimport.run(me(req), req.body && req.body.data, { continue: req.body && req.body.continue }) })));
 r.post('/api/delete-my-data', wrap((req) => { store.deleteAll(me(req), req.body.confirm); }));
 
 r.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));

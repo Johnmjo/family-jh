@@ -50,7 +50,8 @@ export async function settings() {
     <div class="section">Your data</div>
     <div class="card" style="display:flex;flex-direction:column;gap:8px">
       <a class="btn" href="api/export" download>${icon('copy')} Export all my data (JSON)</a>
-      <div class="sub">Importing your history from your old app: export it there (Profile and Settings, then Export) and send the file over. The import gets built against your real file.</div>
+      <label class="btn" style="cursor:pointer">${icon('plus')} Import my RP history<input type="file" id="rpfile" accept=".json,.zip,application/json,application/zip" hidden></label>
+      <div class="sub">In RP Hypertrophy, open Profile and Settings, then Export, and pick that file here (the .zip or the .json inside it). Importing the same file twice is safe.</div>
       <a class="btn" href="mesos" data-link>${icon('list')} All mesos</a>
       <button class="btn danger" id="delall">${icon('trash')} Delete my JH data</button></div>
     <p class="sub" style="text-align:center">Jones Hypertrophy · signed in through the family login</p>`;
@@ -70,9 +71,61 @@ export async function settings() {
     if (ns) settings();
   };
   $('#saveramp').onclick = () => put({ ramp: s.ramp.map((r, i) => ({ pct: Number($(`[data-rp="${i}"]`).value), reps: Number($(`[data-rr="${i}"]`).value), rest: Number($(`[data-rs="${i}"]`).value), optional: r.optional })) }, 'Ramp saved');
+  $('#rpfile').onchange = async (e) => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    let data;
+    try { data = JSON.parse(await readExport(f)); } catch (err) { toast(err.message || 'Could not read that file'); return; }
+    let p;
+    try { p = (await api.post('import/rp/preview', { data })).preview; } catch (err) { toast(err.message); return; }
+    if (!p.mesos) { toast(p.alreadyImported ? `All ${p.alreadyImported} mesos in that file are already here` : 'No mesos found in that file'); return; }
+    const month = (t) => new Date(t).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    const n = (x) => Number(x).toLocaleString();
+    const text = [
+      `${n(p.mesos)} meso${p.mesos > 1 ? 's' : ''} from ${month(p.from)} to ${month(p.to)}: ${n(p.workouts)} workouts and ${n(p.sets)} logged sets, all private to you.`,
+      p.continueMeso ? `"${p.continueMeso}" isn't finished in RP, so it carries on here as your current meso.` : '',
+      p.alreadyImported ? `${p.alreadyImported} already imported will be skipped.` : '',
+      p.newCustomExercises.length ? `${p.newCustomExercises.length} exercise${p.newCustomExercises.length > 1 ? 's' : ''} not in the JH library will be added as your own: ${p.newCustomExercises.slice(0, 5).join(', ')}${p.newCustomExercises.length > 5 ? '…' : ''}.` : '',
+      p.units.some((x) => x !== p.yourUnits) ? `Weights will be converted to ${p.yourUnits}.` : '',
+    ].filter(Boolean).join(' ');
+    if (!(await confirmSheet('Import your RP history?', text, { ok: 'Import' }))) return;
+    try {
+      const r = (await api.post('import/rp', { data })).result;
+      toast(`Imported ${n(r.imported)} mesos and ${n(r.sets)} sets`);
+      await loadHome(); go('mesos');
+    } catch (err) { toast(err.message); }
+  };
   $('#delall').onclick = async () => {
     const v = await confirmSheet('Delete all your JH data?', 'This removes your mesos, history, notes, templates and settings in JH. Your family login and other apps are not touched. Type DELETE to confirm.', { ok: 'Delete everything', danger: true, typeToConfirm: 'DELETE' });
     if (!v) return;
     try { await api.post('delete-my-data', { confirm: v }); toast('Your JH data was deleted'); await loadHome(); go(''); } catch (e) { toast(e.message); }
   };
+}
+
+// The RP export is a .zip holding one .json file. Read either.
+async function readExport(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const isZip = buf[0] === 0x50 && buf[1] === 0x4b;
+  if (!isZip) return new TextDecoder().decode(buf);
+  const v = new DataView(buf.buffer);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('That zip file looks damaged');
+  const count = v.getUint16(eocd + 10, true);
+  let p = v.getUint32(eocd + 16, true);
+  for (let k = 0; k < count; k++) {
+    if (v.getUint32(p, true) !== 0x02014b50) break;
+    const method = v.getUint16(p + 10, true); const size = v.getUint32(p + 20, true);
+    const nl = v.getUint16(p + 28, true); const el = v.getUint16(p + 30, true); const cl = v.getUint16(p + 32, true);
+    const off = v.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + nl));
+    p += 46 + nl + el + cl;
+    if (!/\.json$/i.test(name) || name.startsWith('__MACOSX')) continue;
+    const start = off + 30 + v.getUint16(off + 26, true) + v.getUint16(off + 28, true);
+    const raw = buf.subarray(start, start + size);
+    if (method === 0) return new TextDecoder().decode(raw);
+    if (method !== 8 || typeof DecompressionStream === 'undefined') throw new Error('Unzip the file first, then pick the .json inside');
+    const out = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return await new Response(out).text();
+  }
+  throw new Error('No .json file inside that zip');
 }
