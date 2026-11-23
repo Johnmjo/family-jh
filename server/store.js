@@ -424,9 +424,14 @@ function workoutView(user, id) {
         if (px) last = db.prepare(`SELECT weight, reps FROM sets WHERE wex_id=? AND done=1 AND kind IN ${WORKING} ORDER BY pos`).all(px.id);
       }
       if (!last.length) { const ss = sessionsFor(user, x.exercise_id, { beforeWorkout: w.id, limit: 1 }); if (ss[0]) last = ss[0].sets; }
+      // trend arrows compare with the last time you did this exercise at this week's RIR
+      const curRir = Math.min(rirs[w.week - 1] ?? 2, 4);
+      const base = sessionsFor(user, x.exercise_id, { beforeWorkout: w.id, limit: 60 }).find((g) => g.rir === curRir);
+      const trendSets = base ? base.sets : [];
       let wi = 0;
       const out = sets.map((t) => {
         const isWork = ['regular', 'myo', 'myomatch'].includes(t.kind);
+        const tb = isWork ? trendSets[wi] || null : null;
         const l = isWork ? last[wi++] || null : null;
         // a different weight than planned: the rep target follows, at the same effort
         let adj = null;
@@ -436,7 +441,7 @@ function workoutView(user, id) {
         }
         return {
           ...t, reps: adj != null && echo ? null : t.reps, last: l, plan_reps: t.target_reps, target_reps: adj ?? t.target_reps, adjusted: adj != null && adj !== t.target_reps,
-          trend: t.done && l && isWork ? E.trend(l, { weight: t.weight, reps: t.reps }, model, bw) : null,
+          trend: t.done && tb && isWork ? E.trend(tb, { weight: t.weight, reps: t.reps }, model, bw) : null,
           plates: model.kind === 'plates' && (t.weight ?? t.target_weight) != null ? E.platesPerSide(t.weight ?? t.target_weight, model) : null,
         };
       });

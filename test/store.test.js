@@ -57,10 +57,10 @@ test('full meso: progression, check-ins, deload, privacy', () => {
   const p3 = w3.exercises.find((x) => x.exercise.name === press.name);
   assert.equal(p3.sets.length, 2);
   assert.deepEqual(p3.sets.map((s) => s.target_weight), [105, 105]);
-  // trend badge
+  // trend badge: only against an earlier session at the same RIR (none yet at 0 RIR in this meso)
   S.updateSet(U(), p3.sets[0].id, { weight: 105, reps: 13, done: true });
   w3 = S.workoutView(U(), w3.id);
-  assert.equal(w3.exercises.find((x) => x.exercise.name === press.name).sets[0].trend, 'up');
+  assert.equal(w3.exercises.find((x) => x.exercise.name === press.name).sets[0].trend, null);
   S.workoutAction(U(), w3.id, { action: 'finish', force: true });
   const dl = S.workoutView(U(), v.days[0].workouts[3].id);
   assert.ok(dl.isDeload);
@@ -184,4 +184,8 @@ test('soreness is asked on a muscle\'s first session of a meso, about its last s
   assert.equal(wb.soreness.Calves.answer, null);
   S.soreness(U(), wb.soreness.Calves.checkinId, 'on_time');
   assert.equal(S.workoutView(U(), wb.id).soreness.Calves.answer, 'on_time');
+  // trend compares with the earlier meso's session at the same RIR
+  const sb = S.workoutView(U(), wb.id).exercises[0].sets[0];
+  S.updateSet(U(), sb.id, { weight: 100, reps: 14, done: true });
+  assert.equal(S.workoutView(U(), wb.id).exercises[0].sets[0].trend, 'up');
 });
