@@ -222,3 +222,7 @@ textarea.input { height: auto; min-height: 80px; padding: 10px 12px; }
   border-radius: 22px; padding: 16px 18px 18px; transform: translate(-50%, -50%); animation: pop .18s ease-out; }
 .sheet .grab { display: none; }
 @keyframes pop { from { transform: translate(-50%, -48%) scale(.96); opacity: 0; } }
+
+/* the set timer stays pinned under the family bar while you scroll */
+.timer { position: sticky; top: calc(62px + env(safe-area-inset-top)); z-index: 30; box-shadow: 0 6px 16px rgba(0,0,0,.28); }
+.timer.go { background: linear-gradient(var(--green-bg), var(--green-bg)), var(--card); }
