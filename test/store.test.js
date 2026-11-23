@@ -162,11 +162,11 @@ test('QA v1 fixes: 1RM on a logged set, stale next week, plate dedupe', () => {
   S.updateSettings(U(), { plates: [45, 35, 25, 10, 5, 2.5], plateCounts: [] });
 });
 
-test('current estimated 1RM weighs the last 3 sessions, best-ever kept separately', () => {
+test('current estimated 1RM comes from the latest 0 RIR session, best-ever kept separately', () => {
   const press = ex('Machine Chest Press');
   const d = S.exerciseDetail(U(), press.id);
   assert.ok(d.prs.current && d.prs.current.value > 0);
-  assert.ok(d.prs.current.sessions >= 1 && d.prs.current.sessions <= 3);
+  assert.ok(d.prs.current.date > 0 && d.prs.current.reps > 0);
   assert.ok(d.prs.current.value <= d.prs.e1rm + 1);
   const p = S.progress(U()).exercises.find((e) => e.id === press.id);
   assert.equal(p.current.value, d.prs.current.value);

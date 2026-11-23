@@ -922,18 +922,30 @@ function autofill(user, slots, taken = []) {
   });
 }
 
-// Current estimated 1RM: each of the last 3 sessions' best straight set, weighted 3:2:1 toward the newest,
-// so one great (or bad) day doesn't set the number. Myo sets are left out.
-const RECENT = 3;
+// Current estimated 1RM: the best straight set from your most recent 0 RIR session (the hard week
+// before a deload), since easier weeks leave reps in the tank and skew the number. Without one yet, the
+// newest session counts, with its planned RIR added back. Myo sets are left out.
 function currentMax(user, exerciseId, model, bw) {
-  const ss = sessionsFor(user, exerciseId, { limit: RECENT });
-  const w = [3, 2, 1]; let sum = 0; let ws = 0; const used = [];
-  ss.slice(0, RECENT).forEach((g, i) => {
-    let best = 0;
-    for (const t of g.sets) if (!E.isMyo(t)) best = Math.max(best, E.e1rm(E.effectiveLoad(t.weight, model, bw), t.reps) || 0);
-    if (best) { sum += best * w[i]; ws += w[i]; used.push(g.date); }
-  });
-  return ws ? { value: Math.round(sum / ws), sessions: used.length } : null;
+  const ss = sessionsFor(user, exerciseId, { limit: 60 });
+  const bestOf = (g, addRir) => {
+    let best = null;
+    for (const t of g.sets) {
+      if (E.isMyo(t)) continue;
+      const e = E.e1rm(E.effectiveLoad(t.weight, model, bw), t.reps, addRir ? g.rir : 0) || 0;
+      if (e && (!best || e > best.e)) best = { e, set: t };
+    }
+    return best;
+  };
+  for (const g of ss) {
+    if (g.rir !== 0) continue;
+    const b = bestOf(g, false);
+    if (b) return { value: Math.round(b.e), date: g.date, rir0: true, weight: b.set.weight, reps: b.set.reps };
+  }
+  for (const g of ss) {
+    const b = bestOf(g, true);
+    if (b) return { value: Math.round(b.e), date: g.date, rir0: false, weight: b.set.weight, reps: b.set.reps };
+  }
+  return null;
 }
 
 // ---------- exercise page ----------
