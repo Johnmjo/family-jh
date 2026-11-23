@@ -189,6 +189,7 @@
     const w = Number(prev.weight);
     let d = roundLoad(w * 0.9, model, 'nearest');
     if (d != null && d >= w) d = roundLoad(w * 0.9, model, 'floor'); // a deload always drops when it can
+    if (d != null && d < w * 0.8) d = roundLoad(w, model, 'nearest'); // step too big: keep the weight, the cut reps and sets do the deload
     return { weight: d, reps };
   }
   // Suggested range around a target, so you can adjust to the day (about 10% under to 5% over)
