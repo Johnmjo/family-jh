@@ -108,9 +108,6 @@ function exCard(x, isOpen, idx) {
   const repTarget = x.sets.find((s) => s.kind !== 'warmup' && s.target_reps)?.target_reps;
   const strips = [];
   if (x.pinned.length) strips.push(...x.pinned.map((n) => `<div class="pinned">${icon('note', 14)} ${esc(n.text)}</div>`));
-  const sore = W.soreness[x.muscle];
-  const firstOfMuscle = W.exercises.find((e) => e.muscle === x.muscle) === x;
-  if (sore && !sore.answer && firstOfMuscle && !x.sets.some((s) => s.done)) strips.push(sorenessCard(x.muscle, sore.checkinId));
   if (x.joint_pain === 'flagged' || x.joint_pain === 'painful') strips.push(`<div class="strip red">${icon('flame', 14)} Joints hurt on this last time. Consider a swap. <button class="link-btn" data-replace="${x.id}" style="padding:0">Replace</button></div>`);
   if (x.suggestion && x.suggestion.text && !x.sets.some((s) => s.done)) {
     const g = x.suggestion;
@@ -138,9 +135,10 @@ function exCard(x, isOpen, idx) {
       : s.skipped ? `<button class="log skip" data-unskip="${s.id}">SKIP</button>`
         : s.kind === 'attempt' ? '<span></span>' : `<button class="log" data-log="${s.id}">LOG</button>`;
     const showPlates = (s.kind === 'warmup' || s.kind === 'attempt') && s.plates;
-    let html = `<div class="set ${s.skipped ? 'skipped' : ''}" data-s="${s.id}"><div class="n">${label}</div>
-      <button class="cell ${s.weight == null && !s.done ? 'target' : ''} ${isCur ? 'cur' : ''}" data-edit="${s.id}">${wTxt}</button>
-      <button class="cell ${s.reps == null && !s.done ? 'target' : ''} ${isCur ? 'cur' : ''}" data-edit="${s.id}">${rTxt}${tr}</button>
+    const fb = s === x.sets[0] && W.status === 'pending' && feedbackDue(x.muscle) ? `<button class="fb-req" data-askfb="${esc(x.muscle)}">${icon('info', 16, 2.4)} Your feedback is required</button>` : '';
+    let html = `<div class="set ${s.skipped ? 'skipped' : ''}${fb ? ' has-fb' : ''}" data-s="${s.id}">${fb}<div class="n">${label}</div>
+      <button class="cell ${s.weight == null && !s.done ? 'target' : ''} ${isCur ? 'cur' : ''}" data-edit="${s.id}" data-field="w">${wTxt}</button>
+      <button class="cell ${s.reps == null && !s.done ? 'target' : ''} ${isCur ? 'cur' : ''}" data-edit="${s.id}" data-field="r">${rTxt}${tr}</button>
       <div class="last">${esc(last)}</div>${logBtn}<button class="dots" data-smenu="${s.id}" aria-label="Set menu">${icon('more', 16)}</button></div>`;
     if (showPlates) html += `<div class="set" style="padding:0"><div></div><div class="plates">${esc(E.platesText(s.plates))} per side${s.rest && !s.done ? ` · rest ${E.clock(s.rest)}` : ''}</div><div></div><div></div><div></div></div>`;
     if (s.kind === 'attempt' && !s.done && W.status === 'pending') html += `<div class="attempt-row"><button class="btn green small grow" data-made="${s.id}">Made it</button><button class="btn small grow" data-missed="${s.id}">Missed</button></div>`;
@@ -168,6 +166,34 @@ function checkinCard(muscle, prev) {
     <div class="q">Joints</div>${seg('joints', [['fine', 'Fine'], ['some', 'Some discomfort'], ['painful', 'Painful']])}
     <button class="btn primary block" style="margin-top:10px" data-savecheck="${esc(muscle)}">Save check-in</button></div>`;
 }
+// Asked as a pop-up when you log the first set for a muscle in this workout. Tapping away logs that
+// set, then a red "feedback is required" badge blocks the muscle's other sets until you answer.
+function askSoreness(muscle, checkinId) {
+  return new Promise((resolve) => {
+    let picked = false;
+    sheet(`<div class="eyebrow">${esc(muscle)}</div><div class="h2">How's your ${esc(muscle.toLowerCase())} from last time?</div>
+      <p class="sub" style="margin:4px 0 12px">Soreness since your last ${esc(muscle.toLowerCase())} session. It helps set next week's sets.</p>
+      <div class="menu">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button data-sv="${v}"><span>${l}</span></button>`).join('')}</div>`, {
+      onMount: (el, close) => el.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-sv]'); if (!b) return;
+        if (b.dataset.sv) {
+          picked = true; close();
+          try { await api.queued('POST', `checkins/${checkinId}/soreness`, { value: b.dataset.sv }); if (W.soreness[muscle]) W.soreness[muscle].answer = b.dataset.sv; } catch (err) { toast(err.message); }
+          resolve(true);
+        }
+      }),
+      onClose: () => { if (!picked) resolve(false); }, // closing without an answer doesn't log the set
+    });
+  });
+}
+function needsSoreness(x) {
+  const sore = W.soreness && W.soreness[x.muscle];
+  if (!sore || sore.answer) return null;
+  return sore;
+}
+// After the first set of a muscle is logged, an unanswered soreness question blocks that muscle's other sets
+const muscleStarted = (muscle) => W.exercises.some((e) => e.muscle === muscle && e.sets.some((q) => q.done));
+const feedbackDue = (muscle) => { const so = W.soreness && W.soreness[muscle]; return !!(so && !so.answer && muscleStarted(muscle)); };
 function sorenessCard(muscle, checkinId) {
   return `<div class="check" style="margin-top:6px"><h3>How's your ${esc(muscle.toLowerCase())} from last time?</h3>
     <div class="seg" data-sore="${checkinId}">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button type="button" data-v="${v}">${l}</button>`).join('')}</div></div>`;
@@ -208,6 +234,12 @@ async function logSet(id, values) {
   const reps = values.reps !== undefined ? values.reps : (s.reps ?? s.target_reps);
   if (reps == null) return editSet(id);
   if (x.model.kind !== 'none' && weight == null) return editSet(id);
+  const sore = needsSoreness(x);
+  if (sore) {
+    const answered = await askSoreness(x.muscle, sore.checkinId);
+    // tapping away still logs the muscle's first set; after that the answer is required
+    if (!answered && muscleStarted(x.muscle)) { draw(); return; }
+  }
   const at = Date.now();
   const res = await api.queued('PUT', `sets/${id}`, { weight: x.model.kind === 'none' ? null : weight, reps, done: true, at });
   if (res.queued) {
@@ -227,7 +259,8 @@ function stepFor(x) {
   if (m.kind === 'plates') return 2 * Math.min(...ctx.settings.plates);
   return m.step || 1;
 }
-function editSet(id) {
+// field: 'w' = only the weight, 'r' = only the reps, null = both (used when logging needs both)
+function editSet(id, field = null) {
   const { x, s } = findSet(id);
   if (!s) return;
   const units = ctx.settings.units;
@@ -235,27 +268,56 @@ function editSet(id) {
   let r = s.reps ?? s.target_reps ?? null;
   const step = stepFor(x);
   const noW = x.model.kind === 'none';
+  if (noW && field === 'w') field = 'r';
+  const showW = !noW && field !== 'r';
+  const showR = field !== 'w';
   const plates = () => (x.model.kind === 'plates' && w != null ? (() => { const p = E.platesPerSide(w, x.model); return p ? `${E.platesText(p)} per side` : `Can't be loaded exactly with your plates (nearest ${fmtW(E.roundLoad(w, x.model))})`; })() : '');
   const wLabel = x.model.bodyweight === 'assist' ? 'Assistance' : x.model.bodyweight === 'plus' ? 'Added weight' : 'Weight';
+  const isWork = s.kind !== 'warmup' && s.kind !== 'attempt';
+  // Until you set reps yourself, the rep target follows the weight so the effort stays at this week's RIR
+  let repsTouched = !!(s.done || s.reps != null);
+  const plan = isWork && s.target_weight != null && (s.plan_reps ?? s.target_reps) ? { weight: s.target_weight, reps: s.plan_reps ?? s.target_reps } : null;
+  const followed = () => (repsTouched || !plan || w == null ? null : E.repsAt(plan, w, W.rir, x.model, x.bodyweight));
+  const repsNote = () => { const n = followed(); return n != null && n !== plan.reps ? `Rep target at ${fmtW(w)} ${units}: ${n} reps (same effort, ${rirText(W.rir)})` : ''; };
+  const one = field !== null;
   sheet(`<div class="eyebrow">${s.kind === 'warmup' ? `Warm-up · ${s.pct}%` : s.kind === 'attempt' ? '1RM attempt' : `Set ${x.sets.filter((q) => q.kind !== 'warmup' && q.kind !== 'attempt').indexOf(s) + 1}`}</div>
     <div class="h2 ell">${esc(x.exercise.name)}</div>
-    <div class="sub" style="margin:2px 0 10px">${s.target_reps ? `Target ${fmtW(s.target_weight)} × ${s.target_reps} · ` : ''}${rirText(W.rir)}${s.last ? ` · last ${fmtW(s.last.weight)} × ${s.last.reps}` : ''}</div>
-    ${noW ? `<div class="sub" style="margin-bottom:8px">Bodyweight${x.bodyweight ? ` (${fmtW(x.bodyweight)} ${units})` : ''}. Log your reps.</div>` : `<div class="lab">${wLabel} (${units})</div>
+    <div class="sub" style="margin:2px 0 10px">${plan ? `Plan ${fmtW(plan.weight)} × ${plan.reps} · ` : ''}${rirText(W.rir)}${s.last ? ` · last ${s.last.weight != null ? `${fmtW(s.last.weight)} × ` : ''}${s.last.reps}` : ''}</div>
+    ${noW && showR && !one ? `<div class="sub" style="margin-bottom:8px">Bodyweight${x.bodyweight ? ` (${fmtW(x.bodyweight)} ${units})` : ''}. Log your reps.</div>` : ''}
+    ${showW ? `<div class="lab">${wLabel} (${units})</div>
     <div class="stepper" style="margin:4px 0 4px"><button data-w="-1" aria-label="Less weight">−</button><input id="ew" inputmode="decimal" value="${w == null ? '' : fmtW(w)}"><button data-w="1" aria-label="More weight">+</button></div>
-    <div class="sub" id="eplates" style="min-height:16px;margin-bottom:8px">${esc(plates())}</div>`}
-    <div class="lab">Reps</div>
-    <div class="stepper" style="margin:4px 0 14px"><button data-r="-1" aria-label="Fewer reps">−</button><input id="er" inputmode="numeric" value="${r == null ? '' : r}" placeholder="reps"><button data-r="1" aria-label="More reps">+</button></div>
-    <div class="row"><button class="btn grow" data-save>Save</button><button class="btn primary grow" data-logit>${s.done ? 'Update' : 'Log set'}</button></div>`, {
+    <div class="sub" id="eplates" style="min-height:16px;margin-bottom:4px">${esc(plates())}</div>
+    ${field === 'w' ? `<div class="sub" id="ereps" style="min-height:16px;margin-bottom:10px;color:var(--amber)">${esc(repsNote())}</div>` : ''}` : ''}
+    ${showR ? `<div class="lab">Reps</div>
+    <div class="stepper" style="margin:4px 0 14px"><button data-r="-1" aria-label="Fewer reps">−</button><input id="er" inputmode="numeric" value="${r == null ? '' : r}" placeholder="reps"><button data-r="1" aria-label="More reps">+</button></div>` : ''}
+    <div class="row">${one ? `<button class="btn primary grow" data-save>Save</button>` : `<button class="btn grow" data-save>Save</button><button class="btn primary grow" data-logit>${s.done ? 'Update' : 'Log set'}</button>`}</div>`, {
     onMount: (el, close) => {
       const ew = el.querySelector('#ew'); const er = el.querySelector('#er');
-      const upd = () => { const p = el.querySelector('#eplates'); if (p) p.textContent = plates(); };
-      $$('[data-w]', el).forEach((b) => b.addEventListener('click', () => { const cur = Number(ew.value) || 0; w = Math.max(0, Math.round((cur + Number(b.dataset.w) * step) * 100) / 100); ew.value = fmtW(w); upd(); }));
-      $$('[data-r]', el).forEach((b) => b.addEventListener('click', () => { r = Math.max(0, (Number(er.value) || 0) + Number(b.dataset.r)); er.value = r; }));
+      const upd = () => {
+        const p = el.querySelector('#eplates'); if (p) p.textContent = plates();
+        const n = el.querySelector('#ereps'); if (n) n.textContent = repsNote();
+        const f = followed(); if (er && f != null) { r = f; er.value = f; }
+      };
+      $$('[data-w]', el).forEach((btn) => btn.addEventListener('click', () => { const cur = Number(ew.value) || 0; w = Math.max(0, Math.round((cur + Number(btn.dataset.w) * step) * 100) / 100); ew.value = fmtW(w); upd(); }));
+      $$('[data-r]', el).forEach((btn) => btn.addEventListener('click', () => { repsTouched = true; r = Math.max(0, (Number(er.value) || 0) + Number(btn.dataset.r)); er.value = r; }));
       if (ew) ew.addEventListener('input', () => { w = ew.value === '' ? null : Number(ew.value); upd(); });
-      er.addEventListener('input', () => { r = er.value === '' ? null : Number(er.value); });
-      const vals = () => ({ weight: noW ? null : (ew.value === '' ? null : Number(ew.value)), reps: er.value === '' ? null : Math.round(Number(er.value)) });
-      el.querySelector('[data-save]').onclick = async () => { close(); try { await api.queued('PUT', `sets/${id}`, vals()); await reload(); } catch (e) { toast(e.message); } };
-      el.querySelector('[data-logit]').onclick = async () => {
+      if (er) er.addEventListener('input', () => { repsTouched = true; r = er.value === '' ? null : Number(er.value); });
+      if (field === 'r' && er) setTimeout(() => { er.focus(); er.select(); }, 50);
+      if (field === 'w' && ew) setTimeout(() => { ew.focus(); ew.select(); }, 50);
+      const wVal = () => (noW ? null : ew ? (ew.value === '' ? null : Number(ew.value)) : w);
+      const rVal = () => (er ? (er.value === '' ? null : Math.round(Number(er.value))) : r);
+      const vals = () => {
+        if (field === 'w') return { weight: wVal() }; // reps stay as they were (an unlogged target follows the weight)
+        if (field === 'r') return { reps: rVal() };
+        return { weight: wVal(), reps: rVal() };
+      };
+      el.querySelector('[data-save]').onclick = async () => {
+        const v = vals();
+        if (field === 'r' && s.done && (v.reps == null || (v.reps < 1 && s.kind !== 'attempt'))) { toast('Enter the reps'); return; }
+        close(); try { await api.queued('PUT', `sets/${id}`, v); await reload(); } catch (e) { toast(e.message); }
+      };
+      const lg = el.querySelector('[data-logit]');
+      if (lg) lg.onclick = async () => {
         const v = vals();
         if (v.reps == null || (v.reps < 1 && s.kind !== 'attempt')) { toast('Enter the reps'); return; }
         close();
@@ -263,6 +325,50 @@ function editSet(id) {
       };
     },
   });
+}
+
+// Tap the weight or the reps in a set row and type the number right there.
+// Enter or tapping away saves; Escape cancels. Changing an unlogged weight moves its rep target
+// so the effort stays at this week's RIR (the server works that out).
+function inlineEdit(btn, id, field) {
+  const { x, s } = findSet(id);
+  if (!s) return;
+  if (field === 'w' && x.model.kind === 'none') field = 'r';
+  const cur = field === 'w' ? (s.weight ?? s.target_weight) : (s.reps ?? s.target_reps);
+  const cell = field === 'w' ? btn : btn.closest('.set').querySelector('[data-field="r"]');
+  const inp = document.createElement('input');
+  inp.className = 'cell cur';
+  inp.inputMode = field === 'w' ? 'decimal' : 'numeric';
+  inp.type = 'text';
+  inp.autocomplete = 'off';
+  inp.setAttribute('enterkeyhint', 'done');
+  inp.setAttribute('aria-label', field === 'w' ? 'Weight' : 'Reps');
+  inp.value = cur == null ? '' : field === 'w' ? fmtW(cur) : String(cur);
+  inp.style.textAlign = 'center';
+  cell.replaceWith(inp);
+  inp.focus(); inp.select();
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return; finished = true;
+    const raw = inp.value.trim().replace(',', '.');
+    window.__jhKeepScroll = true;
+    if (!save || raw === '' || raw === (cur == null ? '' : field === 'w' ? fmtW(cur) : String(cur))) { draw(); return; }
+    const v = Number(raw);
+    if (!isFinite(v) || v < 0) { toast(field === 'w' ? 'Check the weight' : 'Check the reps'); draw(); return; }
+    const body = field === 'w' ? { weight: v } : { reps: Math.round(v) };
+    if (field === 'r' && s.done && body.reps < 1 && s.kind !== 'attempt') { toast('Enter the reps'); draw(); return; }
+    try {
+      const res = await api.queued('PUT', `sets/${id}`, body);
+      if (res && res.queued) { Object.assign(s, body); draw(); return; }
+      window.__jhKeepScroll = true;
+      await reload();
+    } catch (e) { toast(e.message); draw(); }
+  };
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  inp.addEventListener('blur', () => finish(true));
 }
 
 function bindHeader() {
@@ -277,8 +383,9 @@ function bindWorkout() {
     const d = t.dataset;
     try {
       if (d.toggle) { const id = Number(d.toggle); openId = pickOpen() === id && !expandAll ? -1 : id; expandAll = false; draw(); return; }
+      if (d.askfb) { const so = W.soreness[d.askfb]; if (so && (await askSoreness(d.askfb, so.checkinId))) draw(); return; }
       if (d.log) return await logSet(Number(d.log), {});
-      if (d.edit) return editSet(Number(d.edit));
+      if (d.edit) return d.field ? inlineEdit(t, Number(d.edit), d.field) : editSet(Number(d.edit));
       if (d.undo) { const ok = await confirmSheet('Undo this set?', 'It will go back to not logged.', { ok: 'Undo' }); if (ok) { await api.put(`sets/${d.undo}`, { done: false }); await reload(); } return; }
       if (d.unskip) { await api.post(`sets/${d.unskip}/action`, { action: 'unskip' }); await reload(); return; }
       if (d.smenu) return setMenu(Number(d.smenu));

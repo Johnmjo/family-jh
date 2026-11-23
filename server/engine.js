@@ -150,6 +150,20 @@
     if (n <= 1) return max;
     return max / (1 + Math.min(n, 30) / 30);
   }
+  // Reps that keep the same effort (the week's RIR) when you pick a different weight than planned.
+  // target: { weight, reps } as planned. Same estimated max, solved for reps at the new weight.
+  function repsAt(target, weight, rir, model, bodyweight) {
+    if (!target || !(target.reps > 0) || target.weight == null || weight == null) return null;
+    if (!model || model.kind === 'none') return null;
+    const r = Math.max(0, Math.min(Number(rir) || 0, 5)); // deload (8) aims at the same easy effort, capped
+    const effT = effectiveLoad(target.weight, model, bodyweight);
+    const effW = effectiveLoad(weight, model, bodyweight);
+    if (!(effT > 0) || !(effW > 0)) return null;
+    if (Math.abs(effT - effW) < 1e-9) return Number(target.reps);
+    const max = e1rm(effT, target.reps, r);
+    const n = 30 * (max / effW - 1); // reps + rir at the new weight
+    return Math.max(1, Math.min(50, Math.round(n - r)));
+  }
   // Effective load for bodyweight movements
   function effectiveLoad(weight, model, bodyweight) {
     const bw = Number(bodyweight) || 0;
@@ -368,7 +382,7 @@
 
   return {
     DEFAULT_SETTINGS, DEFAULT_RAMP, loadModel, roundLoad, platesPerSide, platesText, e1rm, weightFor, effectiveLoad,
-    rirSchedule, nextTarget, deloadTarget, targetRange, setsDelta, applySetsDelta, trend, historyMax, ageFactor,
+    rirSchedule, repsAt, nextTarget, deloadTarget, targetRange, setsDelta, applySetsDelta, trend, historyMax, ageFactor,
     fitWeight, suggestFromHistory, suggestFromSimilar, copyStart, expected1RM, ramp, nextAttempt, restState, clock,
   };
 });
