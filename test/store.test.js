@@ -189,3 +189,17 @@ test('soreness is asked on a muscle\'s first session of a meso, about its last s
   S.updateSet(U(), sb.id, { weight: 100, reps: 14, done: true });
   assert.equal(S.workoutView(U(), wb.id).exercises[0].sets[0].trend, 'up');
 });
+
+test('find your weight: feeler sets go in as warm-ups, the result becomes the target', () => {
+  const ext = ex('Leg Extension');
+  const id = S.createMeso(U(), { name: 'Finder', weeks: 2, days: [{ label: 'A', slots: [{ exercise_id: ext.id, sets: 2, start: { weight: 100, reps: 12 } }] }] });
+  const w = S.workoutView(U(), S.mesoView(U(), id).days[0].workouts[0].id);
+  const x = w.exercises[0];
+  S.wexAction(U(), x.id, { action: 'feeler', weight: 60, reps: 12 });
+  S.wexAction(U(), x.id, { action: 'feeler', weight: 80, reps: 12 });
+  S.wexAction(U(), x.id, { action: 'setTarget', weight: 90, reps: 12 });
+  const v = S.workoutView(U(), w.id).exercises[0].sets;
+  assert.deepEqual(v.map((s) => s.kind), ['warmup', 'warmup', 'regular', 'regular']);
+  assert.deepEqual(v.slice(0, 2).map((s) => [s.weight, s.done]), [[60, 1], [80, 1]]);
+  assert.deepEqual(v.slice(2).map((s) => [s.target_weight, s.target_reps, s.done]), [[90, 12, 0], [90, 12, 0]]);
+});
