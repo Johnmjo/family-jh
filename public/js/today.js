@@ -1,4 +1,4 @@
-// Today's workout, in the compact layout: one exercise open at a time, the set timer on top.
+// Today's workout, in the compact layout: the next exercise opens by itself, any card opens or closes on its own, the set timer on top.
 import { api, E, esc, icon, toast, celebrate, sheet, menu, confirmSheet, promptSheet, chime, mColor, PRIORITY, WEEKDAY, fmtW, fmtDate, rirText, rirHint, infoSheet, $, $$, ApiError } from './ui.js';
 import { ctx, go, loadHome, seq } from './app.js';
 
@@ -21,14 +21,15 @@ export async function today() {
 
 // ---------- workout ----------
 let W = null; // current workout data
-let openId = null; let expandAll = false; let chimedFor = null;
+// cards you opened or closed yourself; the rest follow the next unfinished exercise
+let opened = new Set(); let closed = new Set(); let chimedFor = null;
 
 export async function workout(id, { replaceRoute = false } = {}) {
   const my = seq();
   const data = await api.get(`workouts/${id}`);
   if (my !== seq()) return;
   if (replaceRoute) history.replaceState({}, '', `workout/${id}`);
-  if (!W || W.id !== data.id) { openId = null; expandAll = false; }
+  if (!W || W.id !== data.id) { opened = new Set(); closed = new Set(); }
   W = data;
   draw();
   startTimer();
@@ -38,12 +39,16 @@ async function reload() { const d = await api.get(`workouts/${W.id}`); W = d; dr
 const workSets = (x) => x.sets;
 const isOpenSet = (s) => !s.done && !s.skipped;
 const exDone = (x) => x.sets.every((s) => !isOpenSet(s));
-function pickOpen() {
-  if (openId === -1) return null;
-  if (openId && W.exercises.some((x) => x.id === openId)) return openId;
-  const x = W.exercises.find((e) => !exDone(e));
-  return x ? x.id : null;
+function isOpen(x) {
+  if (closed.has(x.id)) return false;
+  if (opened.has(x.id)) return true;
+  const next = W.exercises.find((e) => !exDone(e));
+  return !!next && next.id === x.id;
 }
+const allOpen = () => W.exercises.length > 0 && W.exercises.every(isOpen);
+function setAll(open) { opened = new Set(open ? W.exercises.map((x) => x.id) : []); closed = new Set(open ? [] : W.exercises.map((x) => x.id)); }
+// a finished exercise folds away so the next one comes up
+function doneFold(x) { if (exDone(x)) { opened.delete(x.id); closed.add(x.id); } }
 
 function header() {
   const date = W.status === 'pending' ? new Date() : new Date(W.finished_at || Date.now());
@@ -63,7 +68,6 @@ function draw() {
     bindHeader();
     return;
   }
-  const open = pickOpen();
   const parts = [header()];
   if (W.status === 'done') parts.push(`<div class="strip green" style="margin:0">Done ${fmtDate(W.finished_at)}${W.firstSetAt && W.lastSetAt ? ` · ${Math.round((W.lastSetAt - W.firstSetAt) / 60000)} min` : ''}</div>`);
   if (W.status === 'skipped') parts.push('<div class="strip" style="margin:0">Skipped. Log a set to bring it back.</div>');
@@ -71,7 +75,7 @@ function draw() {
   for (const n of W.notes) parts.push(`<div class="pinned">${icon('note', 14)} ${esc(n.text)}</div>`);
   const muscles = W.exercises.map((x) => x.muscle);
   W.exercises.forEach((x, i) => {
-    parts.push(exCard(x, expandAll || x.id === open, i));
+    parts.push(exCard(x, isOpen(x), i));
     // check-in after the last exercise of a muscle, once all its sets are logged
     const lastOfMuscle = muscles.lastIndexOf(x.muscle) === i;
     if (lastOfMuscle && !W.isDeload && W.status !== 'skipped') {
@@ -83,7 +87,7 @@ function draw() {
   });
   const allDone = W.exercises.length && W.exercises.every(exDone);
   if (W.status === 'pending') {
-    parts.push(`<div class="foot">${allDone ? `<button class="btn primary grow" id="finish">${icon('check')} Finish workout</button>` : `<button class="btn grow" id="expand">${expandAll ? 'Collapse' : 'Expand all'}</button><button class="btn grow" id="addex">${icon('plus')} Exercise</button>`}</div>`);
+    parts.push(`<div class="foot">${allDone ? `<button class="btn primary grow" id="finish">${icon('check')} Finish workout</button>` : `<button class="btn grow" id="expand">${allOpen() ? 'Collapse all' : 'Expand all'}</button><button class="btn grow" id="addex">${icon('plus')} Exercise</button>`}</div>`);
   }
   if (!W.exercises.length) parts.push('<div class="empty">No exercises yet. Add one with the button above.</div>');
   el.innerHTML = parts.join('');
@@ -252,11 +256,11 @@ async function logSet(id, values) {
     // apply here so the phone keeps working without signal
     Object.assign(s, { weight, reps, done: 1, skipped: 0, logged_at: at });
     W.lastSetAt = at; W.firstSetAt = W.firstSetAt || at; W.lastSet = { logged_at: at, rest: s.rest, wex_id: x.id };
-    if (exDone(x)) openId = null;
+    doneFold(x);
     draw(); return;
   }
   afterLog(res);
-  if (exDone(x)) openId = null;
+  doneFold(x);
   window.__jhKeepScroll = true;
   await reload();
 }
@@ -391,7 +395,7 @@ function bindWorkout() {
     if (!t) return;
     const d = t.dataset;
     try {
-      if (d.toggle) { const id = Number(d.toggle); openId = pickOpen() === id && !expandAll ? -1 : id; expandAll = false; draw(); return; }
+      if (d.toggle) { const x = W.exercises.find((e) => e.id === Number(d.toggle)); if (x) { if (isOpen(x)) { opened.delete(x.id); closed.add(x.id); } else { closed.delete(x.id); opened.add(x.id); } } draw(); return; }
       if (d.askfb) { const so = W.soreness[d.askfb]; if (so && (await askSoreness(d.askfb, so.checkinId))) draw(); return; }
       if (d.log) return await logSet(Number(d.log), {});
       if (d.edit) return d.field ? inlineEdit(t, Number(d.edit), d.field) : editSet(Number(d.edit));
@@ -403,7 +407,7 @@ function bindWorkout() {
       if (d.made || d.missed) { const res = await api.post(`sets/${d.made || d.missed}/action`, { action: 'attempt', made: !!d.made }); afterLog(res); if (d.made) toast('Made it! Recorded as a tested 1RM.'); await reload(); return; }
       if (d.another) { await api.post(`sets/${d.another}/action`, { action: 'another' }); await reload(); return; }
       if (t.id === 'finish') return finish();
-      if (t.id === 'expand') { expandAll = !expandAll; draw(); return; }
+      if (t.id === 'expand') { setAll(!allOpen()); draw(); return; }
       if (t.id === 'addex') return addExercise();
       if (d.v && t.parentElement.dataset.k) { $$('button', t.parentElement).forEach((q) => q.classList.toggle('on', q === t)); return; }
       if (d.v && t.parentElement.dataset.sore) { await api.post(`checkins/${t.parentElement.dataset.sore}/soreness`, { value: d.v }); toast('Thanks. That steers next week\'s sets.'); await reload(); return; }
@@ -515,7 +519,7 @@ async function replaceFlow(id) {
 async function addExercise() {
   const e = await pickExercise({ title: 'Add an exercise' });
   if (!e) return;
-  try { await api.post(`workouts/${W.id}/exercises`, { exercise_id: e.id, muscle: e.muscle, sets: ctx.settings.startSets }); openId = null; await reload(); } catch (err) { toast(err.message); }
+  try { await api.post(`workouts/${W.id}/exercises`, { exercise_id: e.id, muscle: e.muscle, sets: ctx.settings.startSets }); await reload(); } catch (err) { toast(err.message); }
 }
 
 // ---------- Test 1RM ----------
@@ -567,7 +571,7 @@ function workoutMenu() {
     } },
     { label: 'Add exercise', icon: 'plus', run: addExercise },
     { label: 'Bodyweight', sub: W.bodyweight ? `${fmtW(W.bodyweight)} ${ctx.settings.units}` : '', icon: 'scale', run: async () => { const v = await promptSheet(`Bodyweight (${ctx.settings.units})`, { value: W.bodyweight ? fmtW(W.bodyweight) : '' }); if (v && v.value) act(`workouts/${W.id}/action`, { action: 'bodyweight', weight: Number(v.value) }); } },
-    { label: expandAll ? 'Collapse exercises' : 'Expand all exercises', icon: 'list', run: () => { expandAll = !expandAll; draw(); } },
+    { label: allOpen() ? 'Collapse all exercises' : 'Expand all exercises', icon: 'list', run: () => { setAll(!allOpen()); draw(); } },
     ...(W.status !== 'pending' ? [{ label: 'Reopen workout', icon: 'edit', run: () => act(`workouts/${W.id}/action`, { action: 'reopen' }) }] : []),
     { label: 'Reset workout', sub: 'clear everything logged', icon: 'trash', run: async () => { if (await confirmSheet('Reset this workout?', 'All logged sets and check-ins in it are cleared.', { ok: 'Reset', danger: true })) act(`workouts/${W.id}/action`, { action: 'reset' }); } },
     { label: 'Skip workout', icon: 'skip', danger: true, run: async () => {
