@@ -1,0 +1,20 @@
+{
+  "name": "family-jh",
+  "version": "1.0.0",
+  "description": "Jones Hypertrophy: family workout logger",
+  "main": "server/index.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node server/boot.js",
+    "dev": "DEV_USER_EMAIL=you@example.com BASE_PATH=/jh node server/index.js",
+    "seed": "node test/seed.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.2.0",
+    "express": "^5.3.0",
+    "jose": "^6.2.17"
+  },
+  "engines": { "node": ">=20" }
+}

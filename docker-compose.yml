@@ -1,0 +1,18 @@
+# Jones Hypertrophy on Unraid (or any Docker host). Data lives in /mnt/user/appdata/jh on the NAS.
+services:
+  jh:
+    image: ghcr.io/johnmjo/family-jh:latest
+    container_name: family-jh
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    volumes:
+      - /mnt/user/appdata/jh:/data
+    environment:
+      TZ: America/New_York
+      # Cloudflare Access check (REQUIRED): same team domain + AUD tag as the other family apps
+      CF_ACCESS_TEAM_DOMAIN: yourteam.cloudflareaccess.com
+      CF_ACCESS_AUD: ""
+      HUB_URL: https://johnjonesfam.com/  # where the Home pill goes
+      BASE_PATH: /jh                      # also served at /
+      # ALLOWED_EMAILS: you@example.com,partner@example.com
