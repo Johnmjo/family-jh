@@ -503,10 +503,43 @@ async function finish() {
       await api.post(`workouts/${W.id}/action`, { action: 'finish', force: true });
     } else { toast(e.message); return; }
   }
-  const mins = W.firstSetAt && W.lastSetAt ? Math.round((W.lastSetAt - W.firstSetAt) / 60000) : null;
-  toast(`Workout done${mins ? ` in ${mins} min` : ''}. Nice work!`);
+  try { await reload(); } catch {}
   const h = await loadHome();
-  if (h.next) go(`workout/${h.next.id}`); else go(`summary/${W.mesoId}`);
+  recap(h);
+}
+
+// A short recap after finishing: what got done, time, volume, and how sets compared with last time at this RIR.
+function recap(h) {
+  const units = ctx.settings.units;
+  const work = (x) => x.sets.filter((q) => q.kind !== 'warmup');
+  const doneEx = W.exercises.filter((x) => work(x).some((q) => q.done)).length;
+  const skippedEx = W.exercises.length - doneEx;
+  const sets = W.exercises.reduce((n, x) => n + work(x).filter((q) => q.done).length, 0);
+  const vol = W.exercises.reduce((v, x) => v + work(x).filter((q) => q.done && q.weight > 0 && q.reps > 0).reduce((a, q) => a + q.weight * q.reps, 0), 0);
+  const mins = W.firstSetAt && W.lastSetAt ? Math.max(1, Math.round((W.lastSetAt - W.firstSetAt) / 60000)) : null;
+  const tr = { up: 0, flat: 0, down: 0 };
+  for (const x of W.exercises) for (const q of x.sets) if (q.trend) tr[q.trend]++;
+  const anyTrend = tr.up + tr.flat + tr.down > 0;
+  const stat = (n, l) => `<div class="recap-stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const nextLabel = h.next ? `Next workout · Week ${h.next.week} Day ${h.next.day}` : 'Meso summary';
+  sheet(`<div class="recap">
+      <div class="recap-ring">${icon('check', 34, 3)}</div>
+      <div class="eyebrow" style="text-align:center">Week ${W.week} · Day ${W.dayPos + 1} done</div>
+      <div class="h2" style="text-align:center">Workout complete</div>
+      <p class="sub" style="text-align:center;margin:4px 0 14px">Growth happens while you recover. Eat well and sleep well before the next one.</p>
+      <div class="recap-grid">
+        ${stat(doneEx, 'exercises done')}${stat(skippedEx, 'skipped')}
+        ${stat(sets, 'sets logged')}${stat(mins ? `${mins}<small> min</small>` : '—', 'time')}
+        ${stat(vol ? `${Math.round(vol).toLocaleString()}<small> ${units}</small>` : '—', 'volume (weight × reps)')}
+        ${stat(anyTrend ? `<span class="t-up">${tr.up}↑</span> <span class="t-flat">${tr.flat}→</span> <span class="t-down">${tr.down}↓</span>` : '—', 'sets vs last time at this RIR')}
+      </div>
+      <button class="btn primary block" style="margin-top:16px" data-recapnext>${nextLabel}</button>
+      <button class="btn block" style="margin-top:8px" data-recapstay>Stay on this workout</button></div>`, {
+    onMount: (el, close) => {
+      el.querySelector('[data-recapnext]').onclick = () => { close(); if (h.next) go(`workout/${h.next.id}`); else go(`summary/${W.mesoId}`); };
+      el.querySelector('[data-recapstay]').onclick = close;
+    },
+  });
 }
 
 // ---------- set type explainers ----------
