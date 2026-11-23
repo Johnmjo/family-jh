@@ -823,7 +823,7 @@ function mesoAction(user, id, b) {
       const t = templateFromMeso(user, id);
       db.prepare('INSERT INTO templates(user_id,name,focus,days,priorities,created_at) VALUES(?,?,?,?,?,?)').run(user.id, str(b.name, 60) || m.name, 'Mine', JSON.stringify(t.days), JSON.stringify(t.priorities), now());
     } else if (act === 'delete') {
-      if (str(b.confirm) !== m.name && b.confirm !== true) throw new Bad('Type the meso name to confirm');
+      if (String(str(b.confirm) || '').toLowerCase() !== 'delete' && str(b.confirm) !== m.name && b.confirm !== true) throw new Bad('Type delete to confirm');
       db.prepare('DELETE FROM mesos WHERE id=?').run(id);
       if (m.is_current) { const o = db.prepare('SELECT id FROM mesos WHERE user_id=? ORDER BY (status=\'active\') DESC, created_at DESC LIMIT 1').get(user.id); if (o) db.prepare('UPDATE mesos SET is_current=1 WHERE id=?').run(o.id); }
     } else throw new Bad('Unknown action');
@@ -1082,7 +1082,7 @@ function exportAll(user) {
   };
 }
 function deleteAll(user, confirm) {
-  if (confirm !== 'DELETE') throw new Bad('Type DELETE to confirm');
+  if (String(confirm || '').trim().toUpperCase() !== 'DELETE') throw new Bad('Type DELETE to confirm');
   db.transaction(() => {
     db.prepare('DELETE FROM mesos WHERE user_id=?').run(user.id);
     db.prepare('DELETE FROM notes WHERE user_id=?').run(user.id);

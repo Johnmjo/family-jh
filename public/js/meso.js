@@ -63,7 +63,7 @@ export function mesoMenu(m, after = () => meso(m.id)) {
     ...(!m.current ? [{ label: 'Make this the current meso', icon: 'check', run: () => run({ action: 'makeCurrent' }) }] : []),
     ...(m.status !== 'finished' ? [{ label: 'End meso', icon: 'skip', danger: true, run: async () => { if (await confirmSheet('End this meso?', 'It moves to your finished mesos. You can still copy it.', { ok: 'End meso', danger: true })) run({ action: 'end' }); } }] : []),
     { label: 'Delete meso', icon: 'trash', danger: true, run: async () => {
-      const v = await confirmSheet('Delete this meso?', 'All its workouts and logged sets are deleted for good. Type the meso name to confirm.', { ok: 'Delete', danger: true, typeToConfirm: m.name });
+      const v = await confirmSheet('Delete this meso?', 'All its workouts and logged sets are deleted for good. Type delete to confirm.', { ok: 'Delete', danger: true, typeToConfirm: 'delete' });
       if (v) { try { await api.post(`mesos/${m.id}/action`, { action: 'delete', confirm: v }); toast('Meso deleted'); go('mesos'); } catch (e) { toast(e.message); } }
     } },
   ]);
