@@ -1,5 +1,5 @@
 // Today's workout, in the compact layout: one exercise open at a time, the set timer on top.
-import { api, E, esc, icon, toast, celebrate, sheet, menu, confirmSheet, promptSheet, chime, mColor, PRIORITY, WEEKDAY, fmtW, fmtDate, rirText, rirHint, $, $$, ApiError } from './ui.js';
+import { api, E, esc, icon, toast, celebrate, sheet, menu, confirmSheet, promptSheet, chime, mColor, PRIORITY, WEEKDAY, fmtW, fmtDate, rirText, rirHint, infoSheet, $, $$, ApiError } from './ui.js';
 import { ctx, go, loadHome, seq } from './app.js';
 
 const app = () => document.getElementById('app');
@@ -126,7 +126,7 @@ function exCard(x, isOpen, idx) {
     if (isWork) n++;
     const w = s.weight ?? s.target_weight; const r = s.reps ?? s.target_reps;
     const isCur = firstOpen && s.id === firstOpen.id && W.status === 'pending';
-    const label = s.kind === 'warmup' ? `W<small>${s.pct}%</small>` : s.kind === 'attempt' ? `1RM<small>${s.pct}%</small>` : `${n}${s.kind === 'myo' ? '<small>myo</small>' : s.kind === 'myomatch' ? '<small>match</small>' : ''}`;
+    const label = s.kind === 'warmup' ? `W<small>${s.pct}%</small>` : s.kind === 'attempt' ? `1RM<small>${s.pct}%</small>` : `${n}${s.kind === 'myo' ? '<small data-setinfo="myo">myo ⓘ</small>' : s.kind === 'myomatch' ? '<small data-setinfo="myomatch">match ⓘ</small>' : ''}`;
     const tr = s.trend ? `<span class="trend ${s.trend}">${icon(s.trend === 'up' ? 'tUp' : s.trend === 'down' ? 'tDown' : 'tFlat', 14, 3)}</span>` : '';
     const wTxt = x.model.kind === 'none' ? 'BW' : w == null ? '<span class="muted">—</span>' : fmtW(w);
     const rTxt = s.kind === 'attempt' && s.done ? (s.result === 'made' ? 'Made' : 'Missed') : r == null ? `<span class="muted" style="font-size:13px">${W.isDeload ? '' : rirText(W.rir)}</span>` : r;
@@ -378,6 +378,8 @@ function bindHeader() {
 function bindWorkout() {
   const el = app();
   el.onclick = async (e) => {
+    const si = e.target.closest('[data-setinfo]');
+    if (si) { const inf = SET_INFO[si.dataset.setinfo]; return infoSheet(inf.title, inf.html); }
     const t = e.target.closest('button, [data-v]');
     if (!t) return;
     const d = t.dataset;
@@ -424,6 +426,22 @@ async function finish() {
   if (h.next) go(`workout/${h.next.id}`); else go(`summary/${W.mesoId}`);
 }
 
+// ---------- set type explainers ----------
+const SET_INFO = {
+  myo: { title: 'Myo-reps', html: `<p>A way to get a lot of hard reps in very little time.</p>
+    <ol><li><b>Activation set:</b> pick a weight you can do about 12 to 20 times and go to 1 to 2 reps short of failure.</li>
+    <li><b>Rest about 15 seconds</b> (3 to 5 deep breaths).</li>
+    <li><b>Mini-sets:</b> same weight, 3 to 5 reps, rest 15 seconds, repeat.</li>
+    <li><b>Stop</b> when you can't get 3 reps, or after about 5 mini-sets.</li></ol>
+    <p>Log the weight and the <b>total reps</b> of the whole thing (activation set plus all mini-sets).</p>
+    <p class="sub">Best on safe, isolation-type moves (curls, raises, pushdowns, machines). Skip it on heavy squats and deadlifts.</p>` },
+  myomatch: { title: 'Myo-rep match', html: `<p>Comes right after a myo-reps set and matches it.</p>
+    <ol><li>Use the <b>same weight</b> as the myo-reps set above it.</li>
+    <li>Your goal is the <b>same total reps</b> that set got.</li>
+    <li>Do as many as you can, rest about 15 seconds (3 to 5 deep breaths), and keep going in short bursts until you hit that total.</li></ol>
+    <p>Log the weight and the total reps you reached.</p>` },
+};
+
 // ---------- menus ----------
 function setMenu(id) {
   const { x, s } = findSet(id);
@@ -432,8 +450,8 @@ function setMenu(id) {
     ...(x.model.kind !== 'none' && !x.model.bodyweight && s.kind !== 'warmup' && s.kind !== 'attempt' ? [{ label: 'Test 1RM instead', sub: 'warm-ups to your max', icon: 'bolt', run: () => test1rm(x, s) }] : []),
     { group: 'Set type' },
     { label: 'Regular', sub: s.kind === 'regular' ? 'current' : '', run: () => act(`sets/${id}/action`, { action: 'type', kind: 'regular' }) },
-    { label: 'Myo-reps', sub: s.kind === 'myo' ? 'current' : '', run: () => act(`sets/${id}/action`, { action: 'type', kind: 'myo' }) },
-    { label: 'Myo-rep match', sub: s.kind === 'myomatch' ? 'current' : 'after a myo-reps set', run: () => act(`sets/${id}/action`, { action: 'type', kind: 'myomatch' }) },
+    { label: 'Myo-reps', sub: s.kind === 'myo' ? 'current' : '', info: SET_INFO.myo, run: () => act(`sets/${id}/action`, { action: 'type', kind: 'myo' }) },
+    { label: 'Myo-rep match', sub: s.kind === 'myomatch' ? 'current' : 'after a myo-reps set', info: SET_INFO.myomatch, run: () => act(`sets/${id}/action`, { action: 'type', kind: 'myomatch' }) },
     { group: ' ' },
     { label: s.skipped ? 'Unskip set' : 'Skip set', icon: 'skip', run: () => act(`sets/${id}/action`, { action: s.skipped ? 'unskip' : 'skip' }) },
     { label: 'Delete set', icon: 'trash', danger: true, run: () => act(`sets/${id}/action`, { action: 'delete' }) },
