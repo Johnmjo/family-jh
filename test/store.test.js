@@ -171,3 +171,17 @@ test('current estimated 1RM comes from the latest 0 RIR session, best-ever kept 
   const p = S.progress(U()).exercises.find((e) => e.id === press.id);
   assert.equal(p.current.value, d.prs.current.value);
 });
+
+test('soreness is asked on a muscle\'s first session of a meso, about its last session in an earlier meso', () => {
+  const calf = ex('Standing Calf Raise') || db.prepare("SELECT * FROM exercises WHERE muscle='Calves' AND owner_id IS NULL").get();
+  const a = S.createMeso(U(), { name: 'Calves A', weeks: 2, days: [{ label: 'A', slots: [{ exercise_id: calf.id, sets: 2, start: { weight: 100, reps: 12 } }] }] });
+  const wa = S.workoutView(U(), S.mesoView(U(), a).days[0].workouts[0].id);
+  logAll(wa, () => ({ weight: 100, reps: 12 }));
+  S.workoutAction(U(), wa.id, { action: 'finish' });
+  const b = S.createMeso(U(), { name: 'Calves B', weeks: 2, days: [{ label: 'B', slots: [{ exercise_id: calf.id, sets: 2, start: { weight: 100, reps: 12 } }] }] });
+  const wb = S.workoutView(U(), S.mesoView(U(), b).days[0].workouts[0].id);
+  assert.ok(wb.soreness.Calves, 'asks about calves');
+  assert.equal(wb.soreness.Calves.answer, null);
+  S.soreness(U(), wb.soreness.Calves.checkinId, 'on_time');
+  assert.equal(S.workoutView(U(), wb.id).soreness.Calves.answer, 'on_time');
+});
