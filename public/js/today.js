@@ -234,6 +234,12 @@ async function logSet(id, values) {
   const reps = values.reps !== undefined ? values.reps : (s.reps ?? s.target_reps);
   if (reps == null) return editSet(id);
   if (x.model.kind !== 'none' && weight == null) return editSet(id);
+  // an owed "feedback is required" answer (any muscle) blocks logging any other set until it's given
+  const owed = Object.keys(W.soreness || {}).find((m) => feedbackDue(m));
+  if (owed && !s.done) {
+    const answered = await askSoreness(owed, W.soreness[owed].checkinId);
+    if (!answered) { toast(`Answer the ${owed.toLowerCase()} question first`); draw(); return; }
+  }
   const sore = needsSoreness(x);
   if (sore) {
     const answered = await askSoreness(x.muscle, sore.checkinId);
