@@ -135,7 +135,8 @@ function exCard(x, isOpen, idx) {
       : s.skipped ? `<button class="log skip" data-unskip="${s.id}">SKIP</button>`
         : s.kind === 'attempt' ? '<span></span>' : `<button class="log" data-log="${s.id}">LOG</button>`;
     const showPlates = (s.kind === 'warmup' || s.kind === 'attempt') && s.plates;
-    let html = `<div class="set ${s.skipped ? 'skipped' : ''}" data-s="${s.id}"><div class="n">${label}</div>
+    const fb = s === x.sets[0] && W.status === 'pending' && feedbackDue(x.muscle) ? `<button class="fb-req" data-askfb="${esc(x.muscle)}">${icon('info', 16, 2.4)} Your feedback is required</button>` : '';
+    let html = `<div class="set ${s.skipped ? 'skipped' : ''}${fb ? ' has-fb' : ''}" data-s="${s.id}">${fb}<div class="n">${label}</div>
       <button class="cell ${s.weight == null && !s.done ? 'target' : ''} ${isCur ? 'cur' : ''}" data-edit="${s.id}" data-field="w">${wTxt}</button>
       <button class="cell ${s.reps == null && !s.done ? 'target' : ''} ${isCur ? 'cur' : ''}" data-edit="${s.id}" data-field="r">${rTxt}${tr}</button>
       <div class="last">${esc(last)}</div>${logBtn}<button class="dots" data-smenu="${s.id}" aria-label="Set menu">${icon('more', 16)}</button></div>`;
@@ -165,8 +166,8 @@ function checkinCard(muscle, prev) {
     <div class="q">Joints</div>${seg('joints', [['fine', 'Fine'], ['some', 'Some discomfort'], ['painful', 'Painful']])}
     <button class="btn primary block" style="margin-top:10px" data-savecheck="${esc(muscle)}">Save check-in</button></div>`;
 }
-// Asked as a pop-up when you log the first set for a muscle in this workout. An answer is required:
-// closing the pop-up leaves the set unlogged.
+// Asked as a pop-up when you log the first set for a muscle in this workout. Tapping away logs that
+// set, then a red "feedback is required" badge blocks the muscle's other sets until you answer.
 function askSoreness(muscle, checkinId) {
   return new Promise((resolve) => {
     let picked = false;
@@ -188,9 +189,11 @@ function askSoreness(muscle, checkinId) {
 function needsSoreness(x) {
   const sore = W.soreness && W.soreness[x.muscle];
   if (!sore || sore.answer) return null;
-  const started = W.exercises.some((e) => e.muscle === x.muscle && e.sets.some((q) => q.done));
-  return started ? null : sore;
+  return sore;
 }
+// After the first set of a muscle is logged, an unanswered soreness question blocks that muscle's other sets
+const muscleStarted = (muscle) => W.exercises.some((e) => e.muscle === muscle && e.sets.some((q) => q.done));
+const feedbackDue = (muscle) => { const so = W.soreness && W.soreness[muscle]; return !!(so && !so.answer && muscleStarted(muscle)); };
 function sorenessCard(muscle, checkinId) {
   return `<div class="check" style="margin-top:6px"><h3>How's your ${esc(muscle.toLowerCase())} from last time?</h3>
     <div class="seg" data-sore="${checkinId}">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button type="button" data-v="${v}">${l}</button>`).join('')}</div></div>`;
@@ -232,7 +235,11 @@ async function logSet(id, values) {
   if (reps == null) return editSet(id);
   if (x.model.kind !== 'none' && weight == null) return editSet(id);
   const sore = needsSoreness(x);
-  if (sore && !(await askSoreness(x.muscle, sore.checkinId))) return; // an answer is required before the first set
+  if (sore) {
+    const answered = await askSoreness(x.muscle, sore.checkinId);
+    // tapping away still logs the muscle's first set; after that the answer is required
+    if (!answered && muscleStarted(x.muscle)) { draw(); return; }
+  }
   const at = Date.now();
   const res = await api.queued('PUT', `sets/${id}`, { weight: x.model.kind === 'none' ? null : weight, reps, done: true, at });
   if (res.queued) {
@@ -376,6 +383,7 @@ function bindWorkout() {
     const d = t.dataset;
     try {
       if (d.toggle) { const id = Number(d.toggle); openId = pickOpen() === id && !expandAll ? -1 : id; expandAll = false; draw(); return; }
+      if (d.askfb) { const so = W.soreness[d.askfb]; if (so && (await askSoreness(d.askfb, so.checkinId))) draw(); return; }
       if (d.log) return await logSet(Number(d.log), {});
       if (d.edit) return d.field ? inlineEdit(t, Number(d.edit), d.field) : editSet(Number(d.edit));
       if (d.undo) { const ok = await confirmSheet('Undo this set?', 'It will go back to not logged.', { ok: 'Undo' }); if (ok) { await api.put(`sets/${d.undo}`, { done: false }); await reload(); } return; }
