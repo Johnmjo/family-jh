@@ -922,6 +922,20 @@ function autofill(user, slots, taken = []) {
   });
 }
 
+// Current estimated 1RM: each of the last 3 sessions' best straight set, weighted 3:2:1 toward the newest,
+// so one great (or bad) day doesn't set the number. Myo sets are left out.
+const RECENT = 3;
+function currentMax(user, exerciseId, model, bw) {
+  const ss = sessionsFor(user, exerciseId, { limit: RECENT });
+  const w = [3, 2, 1]; let sum = 0; let ws = 0; const used = [];
+  ss.slice(0, RECENT).forEach((g, i) => {
+    let best = 0;
+    for (const t of g.sets) if (!E.isMyo(t)) best = Math.max(best, E.e1rm(E.effectiveLoad(t.weight, model, bw), t.reps) || 0);
+    if (best) { sum += best * w[i]; ws += w[i]; used.push(g.date); }
+  });
+  return ws ? { value: Math.round(sum / ws), sessions: used.length } : null;
+}
+
 // ---------- exercise page ----------
 function exerciseDetail(user, id) {
   const e = exercise(user, id);
@@ -954,6 +968,7 @@ function exerciseDetail(user, id) {
   const notes = db.prepare("SELECT * FROM notes WHERE user_id=? AND scope='exercise' AND ref_id=? ORDER BY created_at DESC").all(user.id, id);
   const similar = e.family ? db.prepare('SELECT id, name, equipment FROM exercises WHERE family=? AND id<>? AND (owner_id IS NULL OR owner_id=?) ORDER BY (equipment=?) DESC, name').all(e.family, id, user.id, e.equipment) : [];
   const fam = H.FAMILIES.find((f) => f.id === e.family);
+  prs.current = currentMax(user, id, model, bw);
   return { ...e, custom: !!e.owner_id, howto: howToOf(e), history: groups, chart, prs, notes, similar, familyLabel: fam ? fam.label : null, units: s.units, compound: isCompound(e) };
 }
 // Replacement list: same family first, then the same muscle
@@ -989,6 +1004,7 @@ function progress(user) {
     b.last = r.logged_at;
   }
   const exercises = Object.values(by).sort((a, b) => b.last - a.last);
+  for (const b of exercises) b.current = currentMax(user, b.id, E.loadModel(b.equipment, s), bw);
   // newest PR per exercise (the very first session is a baseline, not a PR)
   const recent = exercises.map((b) => { const r = b.recent.slice(1); return r.length ? { ...r[r.length - 1], name: b.name, id: b.id } : null; }).filter(Boolean).sort((a, b) => b.at - a.at).slice(0, 8);
   exercises.forEach((b) => delete b.recent);
