@@ -428,8 +428,13 @@ function workoutView(user, id) {
       const out = sets.map((t) => {
         const isWork = ['regular', 'myo', 'myomatch'].includes(t.kind);
         const l = isWork ? last[wi++] || null : null;
+        // a different weight than planned: the rep target follows, at the same effort
+        let adj = null;
+        if (isWork && !t.done && !t.skipped && t.reps == null && t.weight != null && t.target_weight != null && t.target_reps && t.weight !== t.target_weight) {
+          adj = E.repsAt({ weight: t.target_weight, reps: t.target_reps }, t.weight, rirs[w.week - 1], model, bw);
+        }
         return {
-          ...t, last: l,
+          ...t, last: l, plan_reps: t.target_reps, target_reps: adj ?? t.target_reps, adjusted: adj != null && adj !== t.target_reps,
           trend: t.done && l && isWork ? E.trend(l, { weight: t.weight, reps: t.reps }, model, bw) : null,
           plates: model.kind === 'plates' && (t.weight ?? t.target_weight) != null ? E.platesPerSide(t.weight ?? t.target_weight, model) : null,
         };
