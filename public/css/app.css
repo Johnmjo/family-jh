@@ -217,3 +217,8 @@ textarea.input { height: auto; min-height: 80px; padding: 10px 12px; }
 .set .n small[data-setinfo] { cursor: pointer; text-decoration: underline dotted; }
 .menu .menu-row > button { border-top: 1px solid var(--line); }
 .menu .menu-row:first-child > button { border-top: 0; }
+/* pop-ups sit in the middle of the screen (John's preference) */
+.sheet { top: 50%; left: 50%; right: auto; bottom: auto; width: calc(100% - 32px); max-width: 520px; max-height: 85vh; margin: 0;
+  border-radius: 22px; padding: 16px 18px 18px; transform: translate(-50%, -50%); animation: pop .18s ease-out; }
+.sheet .grab { display: none; }
+@keyframes pop { from { transform: translate(-50%, -48%) scale(.96); opacity: 0; } }
