@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>family-jh</Name>
+  <Repository>ghcr.io/johnmjo/family-jh:latest</Repository>
+  <Registry>https://github.com/Johnmjo/family-jh/pkgs/container/family-jh</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Johnmjo/family-jh</Support>
+  <Project>https://github.com/Johnmjo/family-jh</Project>
+  <Overview>Jones Hypertrophy: a private workout logger for each family member. Mesocycles, RIR progression, plate math, rest timer, Test 1RM warm-up ramp and suggested weights. Designed to sit behind Cloudflare Access.</Overview>
+  <Category>Productivity: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8086]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/Johnmjo/family-jh/main/public/icons/icon-192.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <Config Name="Web port" Target="8086" Default="8086" Mode="tcp" Description="Point the hub at http://NAS-IP:8086" Type="Port" Display="always" Required="true" Mask="false">8086</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/jh" Mode="rw" Description="Database" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/jh</Config>
+  <Config Name="Time zone" Target="TZ" Default="America/New_York" Mode="" Description="Container clock" Type="Variable" Display="always" Required="true" Mask="false">America/New_York</Config>
+  <Config Name="Cloudflare team domain" Target="CF_ACCESS_TEAM_DOMAIN" Default="" Mode="" Description="Required. Same value as the other family apps, e.g. yourteam.cloudflareaccess.com." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Cloudflare Access AUD tag" Target="CF_ACCESS_AUD" Default="" Mode="" Description="Required. AUD tag of the wildcard (*) Access application, same as the other apps" Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Hub URL" Target="HUB_URL" Default="https://johnjonesfam.com/" Mode="" Description="Where the home button goes. Leave empty to hide it." Type="Variable" Display="advanced" Required="false" Mask="false">https://johnjonesfam.com/</Config>
+  <Config Name="Base path" Target="BASE_PATH" Default="/jh" Mode="" Description="Prefix the hub serves JH under (johnjonesfam.com/jh/). The app also answers at /." Type="Variable" Display="always" Required="false" Mask="false">/jh</Config>
+  <Config Name="Allowed emails" Target="ALLOWED_EMAILS" Default="" Mode="" Description="Optional comma-separated emails or @domain allowed to use the app" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+</Container>
