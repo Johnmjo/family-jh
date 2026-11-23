@@ -146,3 +146,10 @@ test('timer', () => {
   assert.equal(E.clock(3725), '1:02:05');
   assert.equal(E.restState(null, 1, 1), null);
 });
+
+test('QA v1 fixes: deload always drops, ranges have width', () => {
+  const s = E.DEFAULT_SETTINGS.lb; const dbm = E.loadModel('Dumbbell', s);
+  for (const w of [20, 25, 75, 125]) assert.ok(E.deloadTarget({ weight: w, reps: 12 }, dbm).weight < w, `deload ${w}`);
+  const r = E.targetRange(20, dbm); assert.ok(r[0] < 20 && r[1] > 20);
+  const k = E.targetRange(10, E.loadModel('Dumbbell', E.DEFAULT_SETTINGS.kg)); assert.ok(k[0] < 10 && k[1] > 10);
+});

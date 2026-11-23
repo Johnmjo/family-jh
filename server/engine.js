@@ -186,12 +186,21 @@
     if (!prev || !(prev.reps > 0)) return null;
     const reps = Math.max(1, Math.round(Number(prev.reps) * 2 / 3));
     if (model.kind === 'none' || prev.weight == null || model.bodyweight === 'assist') return { weight: prev.weight ?? null, reps };
-    return { weight: roundLoad(Number(prev.weight) * 0.9, model, 'nearest'), reps };
+    const w = Number(prev.weight);
+    let d = roundLoad(w * 0.9, model, 'nearest');
+    if (d != null && d >= w) d = roundLoad(w * 0.9, model, 'floor'); // a deload always drops when it can
+    return { weight: d, reps };
   }
   // Suggested range around a target, so you can adjust to the day (about 10% under to 5% over)
   function targetRange(weight, model) {
     if (weight == null || model.kind === 'none') return null;
-    return [roundLoad(weight * 0.9, model, 'nearest'), roundLoad(weight * 1.05, model, 'nearest')];
+    let lo = roundLoad(weight * 0.9, model, 'nearest');
+    let hi = roundLoad(weight * 1.05, model, 'nearest');
+    // at least one loadable step each side, so light weights still get a range
+    if (lo != null && lo >= weight) lo = roundLoad(weight - 0.01, model, 'floor');
+    if (hi != null && hi <= weight) hi = roundLoad(weight + 0.01, model, 'ceil') ?? hi;
+    if (lo != null && lo > weight) lo = weight;
+    return [lo, hi];
   }
 
   // Sets for next week from the check-in after a muscle (our rules, matched to John's tests).

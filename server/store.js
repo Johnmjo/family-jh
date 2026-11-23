@@ -38,10 +38,22 @@ function updateSettings(user, body) {
   if (Array.isArray(b.plates)) {
     const p = b.plates.map(num).filter((x) => x > 0 && x <= 100);
     if (!p.length) throw new Bad('Add at least one plate size');
-    next.plates = Array.from(new Set(p)).sort((a, c) => c - a);
-    next.plateCounts = null;
+    // merge duplicate sizes, keeping each size's pair count with it (empty = plenty)
+    const raw = b.plates.map(num);
+    const cnt = Array.isArray(b.plateCounts) ? b.plateCounts : [];
+    const merged = new Map();
+    raw.forEach((w, i) => {
+      if (!(w > 0 && w <= 100)) return;
+      const c = cnt[i] === '' || cnt[i] == null ? null : Math.max(0, Math.floor(Number(cnt[i])));
+      if (!merged.has(w)) merged.set(w, c);
+      else { const o = merged.get(w); merged.set(w, o == null || c == null ? null : o + c); }
+    });
+    next.plates = [...merged.keys()].sort((a, c) => c - a);
+    next.plateCounts = next.plates.map((w) => merged.get(w));
+    if (next.plateCounts.every((c) => c == null)) next.plateCounts = null;
+  } else if (Array.isArray(b.plateCounts)) {
+    next.plateCounts = b.plateCounts.map((c) => (c === '' || c == null ? null : Math.max(0, Math.floor(Number(c)))));
   }
-  if (Array.isArray(b.plateCounts)) next.plateCounts = b.plateCounts.map((c) => (c === '' || c == null ? null : Math.max(0, Math.floor(Number(c)))));
   if (Array.isArray(b.preferredEquipment)) next.preferredEquipment = b.preferredEquipment.filter((e) => EQUIPMENT.includes(e));
   if (Array.isArray(b.ramp)) {
     const r = b.ramp.map((x) => ({ pct: num(x.pct), reps: Math.max(1, Math.floor(num(x.reps) || 1)), rest: Math.max(0, Math.floor(num(x.rest) || 0)), optional: !!x.optional }))
@@ -291,6 +303,18 @@ function addWex(user, workoutId, pos, e, muscle, sets, rir, start, restGoal) {
 }
 const cleanSug = (g) => ({ label: g.label, text: g.text, confidence: g.confidence, weight: g.weight, reps: g.reps, from: g.from });
 
+// When a finished workout changes, next week's copy of that day may already be built from the old
+// numbers. If nothing in it has been logged yet, throw it away so it is rebuilt on open.
+function refreshNext(w) {
+  const nx = db.prepare("SELECT * FROM workouts WHERE meso_id=? AND day_id=? AND week=? AND generated=1 AND status='pending' AND started_at IS NULL").get(w.meso_id, w.day_id, w.week + 1);
+  if (!nx) return;
+  const touched = db.prepare('SELECT COUNT(*) n FROM sets s JOIN wex x ON x.id=s.wex_id WHERE x.workout_id=? AND (s.done=1 OR s.skipped=1)').get(nx.id).n
+    + db.prepare('SELECT COUNT(*) n FROM checkins WHERE workout_id=?').get(nx.id).n;
+  if (touched) return;
+  db.prepare('DELETE FROM wex WHERE workout_id=?').run(nx.id);
+  db.prepare('UPDATE workouts SET generated=0 WHERE id=?').run(nx.id);
+}
+
 // Build a later week's workout from the same day last week: sets from the check-ins, targets from
 // what you actually did. Runs when the workout first unlocks, so late soreness answers count.
 function generate(user, w) {
@@ -477,6 +501,8 @@ function updateSet(user, id, b) {
     }
   });
   tx();
+  const wk = db.prepare('SELECT * FROM workouts WHERE id=?').get(st.workout_id);
+  if (wk && wk.status !== 'pending') refreshNext(wk);
   const pr = done && !st.done ? checkPR(user, st.exercise_id, id) : null;
   return { pr };
 }
@@ -529,10 +555,13 @@ function setAction(user, id, b) {
       if (!(expected > 0)) throw new Bad('Enter your expected max');
       const rows = E.ramp(expected, model, s.ramp, { includeOptional: b.includeOptional !== false });
       if (!rows) throw new Bad('Could not build a ramp for that weight');
-      db.prepare('DELETE FROM sets WHERE id=?').run(id);
-      db.prepare('UPDATE sets SET pos=pos+? WHERE wex_id=? AND pos>?').run(rows.length, st.wex_id, st.pos);
+      // an unlogged set is replaced by the ramp; a logged set is kept and the ramp goes below it
+      const keep = !!(st.done || st.skipped);
+      const at = keep ? st.pos + 1 : st.pos;
+      if (!keep) db.prepare('DELETE FROM sets WHERE id=?').run(id);
+      db.prepare('UPDATE sets SET pos=pos+? WHERE wex_id=? AND pos>=?').run(rows.length, st.wex_id, at);
       const ins = db.prepare('INSERT INTO sets(wex_id,pos,kind,target_weight,target_reps,pct,rest) VALUES(?,?,?,?,?,?,?)');
-      rows.forEach((r, i) => ins.run(st.wex_id, st.pos + i, r.kind, r.weight, r.reps, r.pct, r.rest));
+      rows.forEach((r, i) => ins.run(st.wex_id, at + i, r.kind, r.weight, r.reps, r.pct, r.rest));
       renumber(st.wex_id);
     } else if (act === 'attempt') {
       if (st.kind !== 'attempt') throw new Bad('This isn\'t a 1RM attempt');
@@ -623,7 +652,7 @@ function checkin(user, workoutId, b) {
     .run(w.id, muscle, pick(b.pump, ['low', 'good', 'great']), pick(b.workload, ['easy', 'right', 'pushed', 'too_much']), pick(b.joints, ['fine', 'some', 'painful']), now());
   if (b.joints === 'painful' || b.joints === 'some') {
     db.prepare('UPDATE wex SET joint_pain=? WHERE workout_id=? AND muscle=? AND joint_pain IS NULL').run(b.joints, w.id, muscle);
-  }
+  }  if (w.status !== 'pending') refreshNext(w);
 }
 function soreness(user, checkinId, value) {
   const c = db.prepare('SELECT c.*, m.user_id FROM checkins c JOIN workouts w ON w.id=c.workout_id JOIN mesos m ON m.id=w.meso_id WHERE c.id=?').get(checkinId);
@@ -642,6 +671,7 @@ function workoutAction(user, id, b) {
       if (open) db.prepare('UPDATE sets SET skipped=1 WHERE done=0 AND wex_id IN (SELECT id FROM wex WHERE workout_id=?)').run(w.id);
       db.prepare("UPDATE workouts SET status='done', finished_at=? WHERE id=?").run(now(), w.id);
       maybeFinishMeso(w.meso_id);
+      refreshNext(w);
     } else if (act === 'skip') {
       if (!isUnlocked(w)) throw new Bad('Skip the earlier workouts first', 409);
       if (!w.generated) generate(user, w);

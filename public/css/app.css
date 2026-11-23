@@ -97,7 +97,7 @@ main { max-width: 640px; margin: 0 auto; padding: 10px 14px 24px; display: flex;
 .ex.open .ex-head { padding: 0; min-height: 38px; }
 .stripe { width: 4px; height: 26px; border-radius: 2px; flex: none; }
 .ex-name { font-size: 15px; font-weight: 700; }
-.ex.open .ex-name { font-size: 16px; font-weight: 800; }
+.ex.open .ex-name { font-size: 16px; font-weight: 800; white-space: normal; overflow: visible; line-height: 1.2; }
 .ex-meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
 .count { font-size: 13px; font-weight: 700; color: var(--muted); white-space: nowrap; }
 .count.done { color: var(--green-t); }

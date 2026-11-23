@@ -122,3 +122,35 @@ test('auto-match, skip, export, delete', () => {
   S.deleteAll(kacey, 'DELETE'); // only Kacey's (empty) data
   assert.ok(S.mesoList(U()).length >= 3);
 });
+
+test('QA v1 fixes: 1RM on a logged set, stale next week, plate dedupe', () => {
+  const press = ex('Machine Chest Press');
+  const id = S.createMeso(U(), { name: 'QA fixes', weeks: 4, days: [{ label: 'A', slots: [{ exercise_id: press.id, sets: 2, start: { weight: 100, reps: 12 } }] }] });
+  const v = S.mesoView(U(), id);
+  let w = S.workoutView(U(), v.days[0].workouts[0].id);
+  const [s0, s1] = w.exercises[0].sets;
+  // M1: a logged set survives a 1RM test, and the ramp goes below it
+  S.updateSet(U(), s0.id, { weight: 100, reps: 12, done: true });
+  S.setAction(U(), s0.id, { action: 'test1rm', expected: 200 });
+  w = S.workoutView(U(), w.id);
+  const sets = w.exercises[0].sets;
+  assert.equal(sets[0].id, s0.id); assert.equal(sets[0].done, 1); assert.equal(sets[0].weight, 100);
+  assert.ok(sets.some((t) => t.kind === 'attempt'));
+  assert.ok(sets.some((t) => t.id === s1.id));
+  for (const t of sets) if (!t.done) S.setAction(U(), t.id, { action: 'skip' });
+  S.workoutAction(U(), w.id, { action: 'finish' });
+  // M2: next week is built, then week 1 is reopened and changed: next week is rebuilt
+  const w2id = v.days[0].workouts[1].id;
+  let w2 = S.workoutView(U(), w2id);
+  assert.equal(w2.exercises[0].sets[0].target_weight, 102.5);
+  S.workoutAction(U(), w.id, { action: 'reopen' });
+  S.updateSet(U(), s0.id, { weight: 110, reps: 12, done: true });
+  S.workoutAction(U(), w.id, { action: 'finish', force: true });
+  w2 = S.workoutView(U(), w2id);
+  assert.equal(w2.exercises[0].sets[0].target_weight, 112.5);
+  // L3: duplicate plate sizes keep their counts
+  const st = S.updateSettings(U(), { plates: [25, 25, 20, 10], plateCounts: [1, 2, 1, null] });
+  assert.deepEqual(st.plates, [25, 20, 10]); assert.deepEqual(st.plateCounts, [3, 1, null]);
+  S.updateSettings(U(), { units: 'lb' });
+  S.updateSettings(U(), { plates: [45, 35, 25, 10, 5, 2.5], plateCounts: [] });
+});

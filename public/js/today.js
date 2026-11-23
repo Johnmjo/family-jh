@@ -401,7 +401,7 @@ async function test1rm(x, s) {
       <div class="grow"><div style="font-size:17px;font-weight:800">${fmtW(r.weight)} ${units} × ${r.reps}</div><div class="sub">${r.plates ? `${esc(E.platesText(r.plates))} per side` : ''}</div></div>
       <div class="sub" style="text-align:right">rest<br>${r.kind === 'attempt' ? '3–5 min' : E.clock(r.rest)}</div></div>`).join('');
   };
-  sheet(`<div class="eyebrow">Test 1RM · replaces this set</div><div class="h2">${esc(x.exercise.name)}</div>
+  sheet(`<div class="eyebrow">Test 1RM · ${s && (s.done || s.skipped) ? "adds below this set" : "replaces this set"}</div><div class="h2">${esc(x.exercise.name)}</div>
     <div class="card hot row" style="margin:10px 0;background:linear-gradient(135deg,var(--red-bg),var(--amber-bg))">
       <div class="grow"><div style="font-weight:700;font-size:13px">Expected 1-rep max</div><div class="sub">${info.basis ? `From ${fmtW(info.basis.weight)} × ${info.basis.reps} on ${fmtDate(info.basis.date)}` : 'No history yet. Set your best guess.'}</div></div>
       <button class="icon-btn" data-e="-1" style="border:1px solid var(--amber-line)">−</button><div id="exp" class="num" style="font-size:28px;font-weight:800;min-width:64px;text-align:center">${fmtW(expected)}</div><button class="icon-btn" data-e="1" style="border:1px solid var(--amber-line)">+</button></div>
