@@ -261,3 +261,17 @@ test('feedback: per-exercise joint pain on the 4-step scale maps onto the existi
   S.checkin(U(), w.id, { muscle: 'Triceps', pump: 'low', workload: 'easy', joints: 'fine' });
   assert.equal(S.workoutView(U(), w.id).checkins.find((q) => q.muscle === 'Triceps').joints, 'fine');
 });
+
+test('feedback: correcting joint pain to none clears it; junk values are ignored', () => {
+  const a = db.prepare("SELECT * FROM exercises WHERE muscle='Biceps' AND owner_id IS NULL ORDER BY id LIMIT 1").get();
+  const id = S.createMeso(U(), { name: 'Joints2', weeks: 3, days: [{ label: 'A', slots: [{ exercise_id: a.id, sets: 1, start: { weight: 30, reps: 10 } }] }] });
+  const w = S.workoutView(U(), S.mesoView(U(), id).days[0].workouts[0].id);
+  logAll(w, () => ({ weight: 30, reps: 10 }));
+  const xid = w.exercises[0].id;
+  S.checkin(U(), w.id, { muscle: 'Biceps', pump: 'good', workload: 'right', exJoints: { [xid]: 'severe' } });
+  assert.equal(S.workoutView(U(), w.id).exercises[0].joint_pain, 'painful');
+  S.checkin(U(), w.id, { muscle: 'Biceps', pump: 'good', workload: 'right', exJoints: { [xid]: 'none' } });
+  assert.equal(S.workoutView(U(), w.id).exercises[0].joint_pain, null);
+  S.checkin(U(), w.id, { muscle: 'Biceps', pump: 'good', workload: 'right', joints: 'constructor', exJoints: { [xid]: 'toString' } });
+  assert.equal(S.workoutView(U(), w.id).checkins.find((c) => c.muscle === 'Biceps').joints, null);
+});

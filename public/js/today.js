@@ -313,8 +313,9 @@ async function logSet(id, values) {
     if (!answered) { toast(`Answer the ${owed.toLowerCase()} question first`); draw(); return; }
   }
   const sore = needsSoreness(x);
-  let feel = null;
+  let feel = null; let askedBoth = false;
   if (sore && !s.done && !muscleStarted(x.muscle) && finishesMuscle(x, s) && !W.isDeload && !W.checkins.find((c) => c.muscle === x.muscle)) {
+    askedBoth = true;
     const r = await askBoth(x);
     if (r) {
       try { await api.queued('POST', `checkins/${sore.checkinId}/soreness`, { value: r.soreness }); W.soreness[x.muscle].answer = r.soreness; } catch (err) { toast(err.message); }
@@ -333,14 +334,14 @@ async function logSet(id, values) {
     W.lastSetAt = at; W.firstSetAt = W.firstSetAt || at; W.lastSet = { logged_at: at, rest: s.rest, wex_id: x.id };
     doneFold(x);
     if (feel) { try { await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(x.muscle, feel)); } catch (err) { toast(err.message); } }
-    draw(); if (!feel) maybeAskCheckin(x.muscle); return;
+    draw(); if (!feel && !askedBoth) maybeAskCheckin(x.muscle); return;
   }
   afterLog(res);
   doneFold(x);
   if (feel) { try { await api.post(`workouts/${W.id}/checkin`, checkinBody(x.muscle, feel)); toast('Feedback saved'); } catch (err) { toast(err.message); } }
   window.__jhKeepScroll = true;
   await reload();
-  if (!feel) maybeAskCheckin(x.muscle);
+  if (!feel && !askedBoth) maybeAskCheckin(x.muscle); // closed unanswered: the Feedback needed button stays
 }
 function stepFor(x) {
   const m = x.model;

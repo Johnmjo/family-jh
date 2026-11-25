@@ -718,6 +718,7 @@ function addExerciseToWorkout(user, workoutId, b) {
 // week), the same way RP history imports. The older single muscle-level answer (fine/some/painful) still works.
 const JOINT_LEVEL = { none: 'fine', fine: 'fine', low: 'some', some: 'some', moderate: 'painful', severe: 'painful', painful: 'painful' };
 const JOINT_RANK = { fine: 0, some: 1, painful: 2 };
+const jointLevel = (v) => (typeof v === 'string' && Object.hasOwn(JOINT_LEVEL, v) ? JOINT_LEVEL[v] : null);
 function checkin(user, workoutId, b) {
   const w = workoutOf(user, workoutId);
   const muscle = MUSCLES.includes(b.muscle) ? b.muscle : null; if (!muscle) throw new Bad('Unknown muscle');
@@ -726,12 +727,12 @@ function checkin(user, workoutId, b) {
   const per = [];
   if (b.exJoints && typeof b.exJoints === 'object') {
     for (const [k, v] of Object.entries(b.exJoints)) {
-      const lvl = JOINT_LEVEL[v]; if (!lvl) continue;
+      const lvl = jointLevel(v); if (!lvl) continue;
       const x = db.prepare('SELECT id, joint_pain FROM wex WHERE id=? AND workout_id=? AND muscle=? AND removed=0').get(Number(k), w.id, muscle);
       if (x) per.push({ x, lvl });
     }
   }
-  let joints = JOINT_LEVEL[b.joints] || null;
+  let joints = jointLevel(b.joints);
   for (const p of per) if (joints == null || JOINT_RANK[p.lvl] > JOINT_RANK[joints]) joints = p.lvl;
   db.transaction(() => {
     db.prepare(`INSERT INTO checkins(workout_id,muscle,pump,workload,joints,created_at) VALUES(?,?,?,?,?,?)
@@ -739,7 +740,8 @@ function checkin(user, workoutId, b) {
       .run(w.id, muscle, pick(b.pump, ['low', 'good', 'great']), pick(b.workload, ['easy', 'right', 'pushed', 'too_much']), joints, now());
     if (per.length) {
       for (const { x, lvl } of per) {
-        if (lvl === 'fine') continue; // no pain today leaves any carried-over flag alone
+        // no pain today clears today's own answer, but leaves a flag carried over from last week
+        if (lvl === 'fine') { if (x.joint_pain === 'some' || x.joint_pain === 'painful') db.prepare('UPDATE wex SET joint_pain=NULL WHERE id=?').run(x.id); continue; }
         if (lvl === 'some' && x.joint_pain && x.joint_pain !== 'some') continue; // don't downgrade a flag
         db.prepare('UPDATE wex SET joint_pain=? WHERE id=?').run(lvl, x.id);
       }
