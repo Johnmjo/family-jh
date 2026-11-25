@@ -132,7 +132,9 @@ function exCard(x, isOpen, idx) {
     const w = s.weight ?? s.target_weight; const r = s.reps ?? s.target_reps;
     const isCur = firstOpen && s.id === firstOpen.id && W.status === 'pending';
     const label = s.kind === 'warmup' ? `W<small>${s.pct}%</small>` : s.kind === 'attempt' ? `1RM<small>${s.pct}%</small>` : `${n}${s.kind === 'myo' ? '<small data-setinfo="myo">myo ⓘ</small>' : s.kind === 'myomatch' ? '<small data-setinfo="myomatch">match ⓘ</small>' : ''}`;
-    const tr = s.trend ? `<span class="trend ${s.trend}">${icon(s.trend === 'up' ? 'tUp' : s.trend === 'down' ? 'tDown' : 'tFlat', 14, 3)}</span>` : '';
+    const trTitle = { up: 'Stronger than the same week of your last meso', flat: 'Same as the same week of your last meso', down: 'Weaker than the same week of your last meso' };
+    const tr = (s.on_target ? `<span class="trend hit" title="Hit the target">${icon('tgt', 14, 2.5)}</span>` : '')
+      + (s.trend ? `<span class="trend ${s.trend}" title="${trTitle[s.trend]}">${icon(s.trend === 'up' ? 'tUp' : s.trend === 'down' ? 'tDown' : 'tFlat', 14, 3)}</span>` : '');
     const wTxt = x.model.kind === 'none' ? 'BW' : w == null ? '<span class="muted">—</span>' : fmtW(w);
     const rTxt = s.kind === 'attempt' && s.done ? (s.result === 'made' ? 'Made' : 'Missed') : r == null ? `<span class="muted" style="font-size:13px">${W.isDeload ? '' : rirText(W.rir)}</span>` : r;
     const last = s.last ? `${x.model.kind === 'none' ? '' : `${fmtW(s.last.weight)}×`}${s.last.reps}` : '';
@@ -522,6 +524,8 @@ function recap(h) {
   const tr = { up: 0, flat: 0, down: 0 };
   for (const x of W.exercises) for (const q of x.sets) if (q.trend) tr[q.trend]++;
   const anyTrend = tr.up + tr.flat + tr.down > 0;
+  let tgtN = 0; let tgtHit = 0;
+  for (const x of W.exercises) for (const q of x.sets) if (q.on_target != null) { tgtN++; if (q.on_target) tgtHit++; }
   const stat = (n, l) => `<div class="recap-stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const nextLabel = h.next ? `Next workout · Week ${h.next.week} Day ${h.next.day}` : 'Meso summary';
   sheet(`<div class="recap">
@@ -533,7 +537,8 @@ function recap(h) {
         ${stat(doneEx, 'exercises done')}${stat(skippedEx, 'skipped')}
         ${stat(sets, 'sets logged')}${stat(mins ? `${mins}<small> min</small>` : '—', 'time')}
         ${stat(vol ? `${Math.round(vol).toLocaleString()}<small> ${units}</small>` : '—', 'volume (weight × reps)')}
-        ${stat(anyTrend ? `<span class="t-up">${tr.up}↑</span> <span class="t-flat">${tr.flat}→</span> <span class="t-down">${tr.down}↓</span>` : '—', 'sets vs last time at this RIR')}
+        ${stat(anyTrend ? `<span class="t-up">${tr.up}↑</span> <span class="t-flat">${tr.flat}→</span> <span class="t-down">${tr.down}↓</span>` : '—', 'sets vs same week, last meso')}
+        ${stat(tgtN ? `${tgtHit}<small> of ${tgtN}</small>` : '—', 'sets on target')}
       </div>
       <button class="btn primary block" style="margin-top:16px" data-recapnext>${nextLabel}</button>
       <button class="btn block" style="margin-top:8px" data-recapstay>Stay on this workout</button></div>`, {
