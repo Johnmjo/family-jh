@@ -409,12 +409,16 @@ function trendBaseline(user, m, w, exerciseId) {
   const pos = day ? day.pos : 0;
   const deload = !!m.deload && w.week === m.weeks;
   const weekCond = deload ? 'pm.deload=1 AND pw.week=pm.weeks' : 'pw.week=? AND NOT (pm.deload=1 AND pw.week=pm.weeks)';
-  const args = [user.id, m.id, m.created_at, exerciseId, ...(deload ? [] : [w.week]), pos, pos];
-  const hit = db.prepare(`SELECT x.id xid FROM wex x JOIN workouts pw ON pw.id=x.workout_id JOIN mesos pm ON pm.id=pw.meso_id
+  const args = [user.id, m.id, exerciseId, ...(deload ? [] : [w.week]), pos, pos];
+  // "latest" = most recently trained (imported mesos keep RP's creation date, which can be out of order)
+  const hit = db.prepare(`SELECT x.id xid,
+      COALESCE((SELECT MAX(s2.logged_at) FROM sets s2 JOIN wex x2 ON x2.id=s2.wex_id JOIN workouts w2 ON w2.id=x2.workout_id
+        WHERE w2.meso_id=pm.id AND s2.done=1), pm.created_at) trained
+    FROM wex x JOIN workouts pw ON pw.id=x.workout_id JOIN mesos pm ON pm.id=pw.meso_id
     JOIN meso_days d ON d.id=pw.day_id
-    WHERE pm.user_id=? AND pm.id<>? AND pm.created_at<=? AND x.exercise_id=? AND x.removed=0 AND ${weekCond}
+    WHERE pm.user_id=? AND pm.id<>? AND x.exercise_id=? AND x.removed=0 AND ${weekCond}
       AND EXISTS (SELECT 1 FROM sets s WHERE s.wex_id=x.id AND s.done=1 AND s.kind IN ${WORKING} AND s.reps>0)
-    ORDER BY pm.created_at DESC, pm.id DESC, (d.pos=?) DESC, ABS(d.pos-?), x.pos LIMIT 1`).get(...args);
+    ORDER BY trained DESC, pm.id DESC, (d.pos=?) DESC, ABS(d.pos-?), x.pos LIMIT 1`).get(...args);
   if (!hit) return [];
   return db.prepare(`SELECT weight, reps FROM sets WHERE wex_id=? AND done=1 AND kind IN ${WORKING} AND reps>0 ORDER BY pos`).all(hit.xid);
 }

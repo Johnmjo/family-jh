@@ -132,7 +132,7 @@ function exCard(x, isOpen, idx) {
     const w = s.weight ?? s.target_weight; const r = s.reps ?? s.target_reps;
     const isCur = firstOpen && s.id === firstOpen.id && W.status === 'pending';
     const label = s.kind === 'warmup' ? `W<small>${s.pct}%</small>` : s.kind === 'attempt' ? `1RM<small>${s.pct}%</small>` : `${n}${s.kind === 'myo' ? '<small data-setinfo="myo">myo ⓘ</small>' : s.kind === 'myomatch' ? '<small data-setinfo="myomatch">match ⓘ</small>' : ''}`;
-    const trTitle = { up: 'Stronger than the same week of your last meso', flat: 'Same as the same week of your last meso', down: 'Weaker than the same week of your last meso' };
+    const trTitle = { up: 'Stronger than the same week of your previous meso', flat: 'Same as the same week of your previous meso', down: 'Weaker than the same week of your previous meso' };
     const tr = (s.on_target ? `<span class="trend hit" title="Hit the target">${icon('tgt', 14, 2.5)}</span>` : '')
       + (s.trend ? `<span class="trend ${s.trend}" title="${trTitle[s.trend]}">${icon(s.trend === 'up' ? 'tUp' : s.trend === 'down' ? 'tDown' : 'tFlat', 14, 3)}</span>` : '');
     const wTxt = x.model.kind === 'none' ? 'BW' : w == null ? '<span class="muted">—</span>' : fmtW(w);
