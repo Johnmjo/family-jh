@@ -241,3 +241,21 @@ textarea.input { height: auto; min-height: 80px; padding: 10px 12px; }
 [data-theme="light"] .strip.amber { color: #b45309; }
 .strip.amber .link-btn { color: inherit; font-weight: 800; text-decoration: underline; }
 .recap-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+/* Feedback sheet (RP-style layout) */
+.sheet.fb-sheet { max-height: 92vh; padding-bottom: 0; }
+.fb-top { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 6px; }
+.fb-top .h1 { font-size: 28px; }
+.fb-x { background: none; border: 0; color: var(--text); padding: 6px; margin: -6px; }
+.fb-sec { margin-top: 18px; }
+.fb-h { display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 700; }
+.fb-help { background: none; border: 0; color: var(--muted); padding: 2px; display: inline-grid; }
+.fb-q { margin: 4px 0 10px; color: var(--muted); font-size: 15px; line-height: 1.35; }
+.fb-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.fb-tiles button { min-height: 58px; border-radius: 10px; border: 1.5px solid color-mix(in srgb, var(--a) 70%, transparent); background: color-mix(in srgb, var(--a) 16%, var(--card)); color: var(--text); font-weight: 700; font-size: 14px; line-height: 1.2; padding: 6px 4px; }
+.fb-tiles button.on { background: var(--grad); color: var(--on-grad); border-color: transparent; }
+.fb-foot { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 10px; margin: 22px -18px 0; padding: 12px 18px 16px; background: var(--card); border-top: 1px solid var(--line); }
+.fb-foot .btn { min-width: 110px; }
+.btn.ghost { background: none; border-color: transparent; }
+.fb-need { display: flex; align-items: center; gap: 8px; width: 100%; margin: 6px 0 2px; padding: 12px 14px; border-radius: 12px; border: 1px dashed var(--amber-line); background: var(--amber-bg); color: var(--amber); font-weight: 700; font-size: 14px; text-align: left; }
+.fb-need span { flex: 1; }
+.fb-need b { background: var(--grad); color: var(--on-grad); padding: 6px 12px; border-radius: 999px; font-size: 13px; }

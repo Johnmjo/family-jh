@@ -713,16 +713,41 @@ function addExerciseToWorkout(user, workoutId, b) {
   const pos = db.prepare('SELECT COALESCE(MAX(pos),-1)+1 p FROM wex WHERE workout_id=?').get(w.id).p;
   return { wexId: addWex(user, w.id, pos, e, MUSCLES.includes(b.muscle) ? b.muscle : e.muscle, Math.max(1, Math.min(6, num(b.sets) || 2)), J(m.rirs, [])[w.week - 1] ?? 2, null, null) };
 }
+// Joint pain comes per exercise on the 4-step scale (none, low, moderate, severe). It maps onto the
+// existing levels: low = "some" (noted), moderate or severe = "painful" (flagged with a swap hint next
+// week), the same way RP history imports. The older single muscle-level answer (fine/some/painful) still works.
+const JOINT_LEVEL = { none: 'fine', fine: 'fine', low: 'some', some: 'some', moderate: 'painful', severe: 'painful', painful: 'painful' };
+const JOINT_RANK = { fine: 0, some: 1, painful: 2 };
 function checkin(user, workoutId, b) {
   const w = workoutOf(user, workoutId);
   const muscle = MUSCLES.includes(b.muscle) ? b.muscle : null; if (!muscle) throw new Bad('Unknown muscle');
   const pick = (v, list) => (list.includes(v) ? v : null);
-  db.prepare(`INSERT INTO checkins(workout_id,muscle,pump,workload,joints,created_at) VALUES(?,?,?,?,?,?)
-    ON CONFLICT(workout_id,muscle) DO UPDATE SET pump=excluded.pump, workload=excluded.workload, joints=excluded.joints`)
-    .run(w.id, muscle, pick(b.pump, ['low', 'good', 'great']), pick(b.workload, ['easy', 'right', 'pushed', 'too_much']), pick(b.joints, ['fine', 'some', 'painful']), now());
-  if (b.joints === 'painful' || b.joints === 'some') {
-    db.prepare('UPDATE wex SET joint_pain=? WHERE workout_id=? AND muscle=? AND joint_pain IS NULL').run(b.joints, w.id, muscle);
-  }  if (w.status !== 'pending') refreshNext(w);
+  // per-exercise answers, only for this workout's exercises of this muscle
+  const per = [];
+  if (b.exJoints && typeof b.exJoints === 'object') {
+    for (const [k, v] of Object.entries(b.exJoints)) {
+      const lvl = JOINT_LEVEL[v]; if (!lvl) continue;
+      const x = db.prepare('SELECT id, joint_pain FROM wex WHERE id=? AND workout_id=? AND muscle=? AND removed=0').get(Number(k), w.id, muscle);
+      if (x) per.push({ x, lvl });
+    }
+  }
+  let joints = JOINT_LEVEL[b.joints] || null;
+  for (const p of per) if (joints == null || JOINT_RANK[p.lvl] > JOINT_RANK[joints]) joints = p.lvl;
+  db.transaction(() => {
+    db.prepare(`INSERT INTO checkins(workout_id,muscle,pump,workload,joints,created_at) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(workout_id,muscle) DO UPDATE SET pump=excluded.pump, workload=excluded.workload, joints=excluded.joints`)
+      .run(w.id, muscle, pick(b.pump, ['low', 'good', 'great']), pick(b.workload, ['easy', 'right', 'pushed', 'too_much']), joints, now());
+    if (per.length) {
+      for (const { x, lvl } of per) {
+        if (lvl === 'fine') continue; // no pain today leaves any carried-over flag alone
+        if (lvl === 'some' && x.joint_pain && x.joint_pain !== 'some') continue; // don't downgrade a flag
+        db.prepare('UPDATE wex SET joint_pain=? WHERE id=?').run(lvl, x.id);
+      }
+    } else if (joints === 'painful' || joints === 'some') {
+      db.prepare('UPDATE wex SET joint_pain=? WHERE workout_id=? AND muscle=? AND joint_pain IS NULL').run(joints, w.id, muscle);
+    }
+  })();
+  if (w.status !== 'pending') refreshNext(w);
 }
 function soreness(user, checkinId, value) {
   const c = db.prepare('SELECT c.*, m.user_id FROM checkins c JOIN workouts w ON w.id=c.workout_id JOIN mesos m ON m.id=w.meso_id WHERE c.id=?').get(checkinId);
