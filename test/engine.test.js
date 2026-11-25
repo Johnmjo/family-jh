@@ -160,3 +160,12 @@ test('myo-reps totals do not count toward an estimated max', () => {
   const v = E.expected1RM([{ date: 1, rir: 0, sets: [{ weight: 155, reps: 20, kind: 'myo' }, { weight: 205, reps: 6, kind: 'regular' }] }], model, null);
   assert.ok(v < 250, `got ${v}`);
 });
+
+test('repsAt rounds up, so a heavier weight never gets a weaker rep target', () => {
+  const db = E.loadModel('Dumbbell', LB);
+  // 35 x 13 at 2 RIR -> about 7.2 reps at 40: target 8, not 7
+  const r = E.repsAt({ weight: 35, reps: 13 }, 40, 2, db);
+  assert.equal(r, 8);
+  assert.notEqual(E.trend({ weight: 35, reps: 13 }, { weight: 40, reps: r }, db), 'down');
+  assert.equal(E.repsAt({ weight: 100, reps: 10 }, 100, 2, bar), 10);
+});

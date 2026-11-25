@@ -203,3 +203,37 @@ test('find your weight: feeler sets go in as warm-ups, the result becomes the ta
   assert.deepEqual(v.slice(0, 2).map((s) => [s.weight, s.done]), [[60, 1], [80, 1]]);
   assert.deepEqual(v.slice(2).map((s) => [s.target_weight, s.target_reps, s.done]), [[90, 12, 0], [90, 12, 0]]);
 });
+
+test('trend compares with the same week and day of the previous meso, never earlier days of this one', () => {
+  const lc = db.prepare("SELECT * FROM exercises WHERE muscle='Hamstrings' AND owner_id IS NULL ORDER BY id LIMIT 1").get();
+  const mk = (name) => S.createMeso(U(), { name, weeks: 3, days: [0, 1].map((i) => ({ label: `D${i}`, slots: [{ exercise_id: lc.id, sets: 1, start: { weight: 100, reps: 10 } }] })) });
+  const run = (id, d, reps) => {
+    const w = S.workoutView(U(), S.mesoView(U(), id).days[d].workouts[0].id);
+    const s = w.exercises[0].sets.find((q) => q.kind === 'regular');
+    S.updateSet(U(), s.id, { weight: 100, reps, done: true });
+    const out = S.workoutView(U(), w.id).exercises[0].sets.find((q) => q.id === s.id);
+    S.workoutAction(U(), w.id, { action: 'finish', force: true });
+    return out;
+  };
+  const a = mk('Ham A');
+  assert.equal(run(a, 0, 10).trend, null, 'nothing earlier to compare with');
+  assert.equal(run(a, 1, 8).trend, null, 'day 1 of the same meso does not count');
+  const b = mk('Ham B');
+  const b0 = run(b, 0, 10);
+  assert.equal(b0.trend, 'flat', 'vs A week 1 day 1 (100x10)');
+  assert.equal(b0.on_target, true, 'hit the 10-rep target');
+  const b1 = run(b, 1, 9);
+  assert.equal(b1.trend, 'up', 'vs A week 1 day 2 (100x8), not B day 1 (100x10)');
+});
+
+test('on-target check follows a changed weight', () => {
+  const lc = db.prepare("SELECT * FROM exercises WHERE muscle='Glutes' AND owner_id IS NULL ORDER BY id LIMIT 1").get();
+  const id = S.createMeso(U(), { name: 'Tgt', weeks: 3, days: [{ label: 'A', slots: [{ exercise_id: lc.id, sets: 2, start: { weight: 100, reps: 10 } }] }] });
+  const w = S.workoutView(U(), S.mesoView(U(), id).days[0].workouts[0].id);
+  const [s1, s2] = w.exercises[0].sets.filter((q) => q.kind === 'regular');
+  S.updateSet(U(), s1.id, { weight: s1.target_weight, reps: s1.target_reps - 1, done: true });
+  S.updateSet(U(), s2.id, { weight: s2.target_weight, reps: s2.target_reps, done: true });
+  const v = S.workoutView(U(), w.id).exercises[0].sets.filter((q) => q.kind === 'regular');
+  assert.equal(v[0].on_target, false);
+  assert.equal(v[1].on_target, true);
+});

@@ -163,7 +163,8 @@
     if (Math.abs(effT - effW) < 1e-9) return Number(target.reps);
     const max = e1rm(effT, target.reps, r);
     const n = 30 * (max / effW - 1); // reps + rir at the new weight
-    return Math.max(1, Math.min(50, Math.round(n - r)));
+    // round up, so the new target is never a little weaker than the plan (progressive overload)
+    return Math.max(1, Math.min(50, Math.ceil(n - r - 1e-6)));
   }
   // Effective load for bodyweight movements
   function effectiveLoad(weight, model, bodyweight) {

@@ -401,6 +401,35 @@ function generate(user, w) {
 }
 
 // ---------- workout view ----------
+// The sets to compare a workout's exercise with: the same week (deload with deload) and the same
+// day of the latest earlier meso that has it, else another day of that week, else an older meso.
+// Earlier days of the current meso never count: they share this week's target, so they can't show overload.
+function trendBaseline(user, m, w, exerciseId) {
+  const day = db.prepare('SELECT pos FROM meso_days WHERE id=?').get(w.day_id);
+  const pos = day ? day.pos : 0;
+  const deload = !!m.deload && w.week === m.weeks;
+  const weekCond = deload ? 'pm.deload=1 AND pw.week=pm.weeks' : 'pw.week=? AND NOT (pm.deload=1 AND pw.week=pm.weeks)';
+  const args = [user.id, m.id, exerciseId, ...(deload ? [] : [w.week]), pos, pos];
+  // "latest" = most recently trained (imported mesos keep RP's creation date, which can be out of order)
+  const hit = db.prepare(`SELECT x.id xid,
+      COALESCE((SELECT MAX(s2.logged_at) FROM sets s2 JOIN wex x2 ON x2.id=s2.wex_id JOIN workouts w2 ON w2.id=x2.workout_id
+        WHERE w2.meso_id=pm.id AND s2.done=1), pm.created_at) trained
+    FROM wex x JOIN workouts pw ON pw.id=x.workout_id JOIN mesos pm ON pm.id=pw.meso_id
+    JOIN meso_days d ON d.id=pw.day_id
+    WHERE pm.user_id=? AND pm.id<>? AND x.exercise_id=? AND x.removed=0 AND ${weekCond}
+      AND EXISTS (SELECT 1 FROM sets s WHERE s.wex_id=x.id AND s.done=1 AND s.kind IN ${WORKING} AND s.reps>0)
+    ORDER BY trained DESC, pm.id DESC, (d.pos=?) DESC, ABS(d.pos-?), x.pos LIMIT 1`).get(...args);
+  if (!hit) return [];
+  return db.prepare(`SELECT weight, reps FROM sets WHERE wex_id=? AND done=1 AND kind IN ${WORKING} AND reps>0 ORDER BY pos`).all(hit.xid);
+}
+// Did a logged set meet its target? Same weight: reps at or above the target. Another weight: reps at
+// or above what that weight needs for the same effort. Sets with no rep target (effort only) give null.
+function hitTarget(t, rir, model, bw) {
+  if (!t.done || !t.target_reps || !(t.reps > 0)) return null;
+  if (t.weight == null || t.target_weight == null || t.weight === t.target_weight) return t.reps >= t.target_reps;
+  const need = E.repsAt({ weight: t.target_weight, reps: t.target_reps }, t.weight, rir, model, bw);
+  return need == null ? null : t.reps >= need;
+}
 function workoutView(user, id) {
   const w = workoutOf(user, id);
   const unlocked = isUnlocked(w);
@@ -424,10 +453,8 @@ function workoutView(user, id) {
         if (px) last = db.prepare(`SELECT weight, reps FROM sets WHERE wex_id=? AND done=1 AND kind IN ${WORKING} ORDER BY pos`).all(px.id);
       }
       if (!last.length) { const ss = sessionsFor(user, x.exercise_id, { beforeWorkout: w.id, limit: 1 }); if (ss[0]) last = ss[0].sets; }
-      // trend arrows compare with the last time you did this exercise at this week's RIR
-      const curRir = Math.min(rirs[w.week - 1] ?? 2, 4);
-      const base = sessionsFor(user, x.exercise_id, { beforeWorkout: w.id, limit: 60 }).find((g) => g.rir === curRir);
-      const trendSets = base ? base.sets : [];
+      // trend arrows compare with the same week and day of your previous meso
+      const trendSets = trendBaseline(user, m, w, x.exercise_id);
       let wi = 0;
       const out = sets.map((t) => {
         const isWork = ['regular', 'myo', 'myomatch'].includes(t.kind);
@@ -442,6 +469,7 @@ function workoutView(user, id) {
         return {
           ...t, reps: adj != null && echo ? null : t.reps, last: l, plan_reps: t.target_reps, target_reps: adj ?? t.target_reps, adjusted: adj != null && adj !== t.target_reps,
           trend: t.done && tb && isWork ? E.trend(tb, { weight: t.weight, reps: t.reps }, model, bw) : null,
+          on_target: isWork ? hitTarget(t, rirs[w.week - 1], model, bw) : null,
           plates: model.kind === 'plates' && (t.weight ?? t.target_weight) != null ? E.platesPerSide(t.weight ?? t.target_weight, model) : null,
         };
       });
