@@ -410,9 +410,10 @@ function trendBaseline(user, m, w, exerciseId) {
   const deload = !!m.deload && w.week === m.weeks;
   const weekCond = deload ? 'pm.deload=1 AND pw.week=pm.weeks' : 'pw.week=? AND NOT (pm.deload=1 AND pw.week=pm.weeks)';
   const args = [user.id, m.id, exerciseId, ...(deload ? [] : [w.week]), pos, pos];
-  // "latest" = most recently trained (imported mesos keep RP's creation date, which can be out of order)
+  // "latest" = most recently started, by its first logged set (imported mesos keep RP's creation date,
+  // which can be out of order; the last logged set moves when an old set is edited later)
   const hit = db.prepare(`SELECT x.id xid,
-      COALESCE((SELECT MAX(s2.logged_at) FROM sets s2 JOIN wex x2 ON x2.id=s2.wex_id JOIN workouts w2 ON w2.id=x2.workout_id
+      COALESCE((SELECT MIN(s2.logged_at) FROM sets s2 JOIN wex x2 ON x2.id=s2.wex_id JOIN workouts w2 ON w2.id=x2.workout_id
         WHERE w2.meso_id=pm.id AND s2.done=1), pm.created_at) trained
     FROM wex x JOIN workouts pw ON pw.id=x.workout_id JOIN mesos pm ON pm.id=pw.meso_id
     JOIN meso_days d ON d.id=pw.day_id
