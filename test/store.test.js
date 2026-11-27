@@ -275,3 +275,30 @@ test('feedback: correcting joint pain to none clears it; junk values are ignored
   S.checkin(U(), w.id, { muscle: 'Biceps', pump: 'good', workload: 'right', joints: 'constructor', exJoints: { [xid]: 'toString' } });
   assert.equal(S.workoutView(U(), w.id).checkins.find((c) => c.muscle === 'Biceps').joints, null);
 });
+
+test('feedback: joint pain answered after each exercise counts toward the muscle check-in', () => {
+  const tri = db.prepare("SELECT * FROM exercises WHERE muscle='Triceps' AND owner_id IS NULL ORDER BY id LIMIT 3").all();
+  const id = S.createMeso(U(), { name: 'Joints3', weeks: 3, days: [{ label: 'A', slots: tri.map((e) => ({ exercise_id: e.id, sets: 1, start: { weight: 40, reps: 10 } })) }] });
+  const w = S.workoutView(U(), S.mesoView(U(), id).days[0].workouts[0].id);
+  logAll(w, () => ({ weight: 40, reps: 10 }));
+  const [x1, x2, x3] = w.exercises;
+  assert.equal(x1.joint_answer, null);
+  S.wexAction(U(), x2.id, { action: 'jointAnswer', value: 'moderate' });
+  S.wexAction(U(), x1.id, { action: 'jointAnswer', value: 'none' });
+  assert.throws(() => S.wexAction(U(), x1.id, { action: 'jointAnswer', value: 'toString' }));
+  let v = S.workoutView(U(), w.id);
+  assert.equal(v.exercises.find((x) => x.id === x1.id).joint_answer, 'none');
+  assert.equal(v.exercises.find((x) => x.id === x2.id).joint_answer, 'moderate');
+  assert.equal(v.exercises.find((x) => x.id === x2.id).joint_pain, 'painful');
+  // the last exercise is answered in the muscle's sheet; the muscle keeps the worst of all three
+  S.checkin(U(), w.id, { muscle: 'Triceps', pump: 'good', workload: 'right', exJoints: { [x3.id]: 'low' } });
+  v = S.workoutView(U(), w.id);
+  assert.equal(v.exercises.find((x) => x.id === x3.id).joint_answer, 'low');
+  assert.equal(v.checkins.find((c) => c.muscle === 'Triceps').joints, 'painful');
+  // nothing new in the sheet: still the worst of the answers given after each exercise
+  S.checkin(U(), w.id, { muscle: 'Triceps', pump: 'low', workload: 'easy', exJoints: {} });
+  assert.equal(S.workoutView(U(), w.id).checkins.find((c) => c.muscle === 'Triceps').joints, 'painful');
+  // changing an answer after the check-in keeps the muscle's worst answer current
+  S.wexAction(U(), x2.id, { action: 'jointAnswer', value: 'none' });
+  assert.equal(S.workoutView(U(), w.id).checkins.find((c) => c.muscle === 'Triceps').joints, 'some');
+});

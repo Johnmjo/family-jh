@@ -76,6 +76,7 @@ function draw() {
   const muscles = W.exercises.map((x) => x.muscle);
   W.exercises.forEach((x, i) => {
     parts.push(exCard(x, isOpen(x), i));
+    if (jointOwed(x) && !muscleFinished(x.muscle)) parts.push(`<button class="fb-need" data-fbjoint="${x.id}">${icon('note', 16)} <span>Joint pain needed for ${esc(x.exercise.name)}</span><b>Answer</b></button>`);
     // check-in after the last exercise of a muscle, once all its sets are logged
     const lastOfMuscle = muscles.lastIndexOf(x.muscle) === i;
     if (lastOfMuscle && !W.isDeload && W.status !== 'skipped') {
@@ -177,7 +178,7 @@ const FB_HELP = {
   volume: ['Volume', '<p>How the number of hard sets for this muscle felt today.</p><p><b>Not enough</b> or <b>just right</b> with a low pump adds a set next week. <b>Pushed my limits</b> holds steady (or trims a set without a great pump). <b>Too much</b> takes a set away.</p>'],
   sore: ['Soreness', '<p>How the muscle recovered since you last trained it.</p><p><b>Still sore</b> means it needs more recovery, so sets won\'t be added next week.</p>'],
 };
-function feedbackSheet(muscle, exercises, { withSoreness = false } = {}) {
+function feedbackSheet(muscle, exercises, { withSoreness = false, jointOnly = false } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const m = esc(muscle.toLowerCase());
@@ -189,14 +190,14 @@ function feedbackSheet(muscle, exercises, { withSoreness = false } = {}) {
       <div class="fb-top"><div class="h1">Feedback</div><button type="button" class="fb-x" data-fbx aria-label="Close">${icon('x', 26, 2.2)}</button></div>
       ${withSoreness ? sec(`${esc(muscle)} soreness`, 'sore', `How did your ${m} recover since your last ${m} session?`, tiles('sore', SORE_OPTS, curSore)) : ''}
       ${exercises.map((x) => sec('Joint pain', 'joint', `How did your joints feel during ${esc(x.exercise.name)}?`, tiles(`j${x.id}`, JOINT_OPTS))).join('')}
-      ${sec(`${esc(muscle)} pump`, 'pump', `How much of a pump did you get today in your ${m}?`, tiles('pump', PUMP_OPTS))}
-      ${sec(`${esc(muscle)} volume`, 'volume', `How was the volume of work (number of hard sets) for your ${m}?`, tiles('workload', VOL_OPTS))}
+      ${jointOnly ? '' : sec(`${esc(muscle)} pump`, 'pump', `How much of a pump did you get today in your ${m}?`, tiles('pump', PUMP_OPTS))}
+      ${jointOnly ? '' : sec(`${esc(muscle)} volume`, 'volume', `How was the volume of work (number of hard sets) for your ${m}?`, tiles('workload', VOL_OPTS))}
       <div class="fb-foot"><button type="button" class="btn ghost" data-fbcancel>Cancel</button><button type="button" class="btn primary" data-fbsave disabled>${withSoreness ? 'Log set and save' : 'Save'}</button></div></div>`;
     sheet(html, {
       onMount: (el, close) => {
         el.classList.add('fb-sheet');
         const val = (k) => el.querySelector(`[data-k="${k}"] .on`)?.dataset.v;
-        const keys = [...(withSoreness ? ['sore'] : []), ...exercises.map((x) => `j${x.id}`), 'pump', 'workload'];
+        const keys = [...(withSoreness ? ['sore'] : []), ...exercises.map((x) => `j${x.id}`), ...(jointOnly ? [] : ['pump', 'workload'])];
         const save = el.querySelector('[data-fbsave]');
         const refresh = () => { save.disabled = !keys.every((k) => val(k)); };
         refresh();
@@ -218,24 +219,62 @@ function feedbackSheet(muscle, exercises, { withSoreness = false } = {}) {
   });
 }
 const checkinBody = (muscle, r) => ({ muscle, pump: r.pump, workload: r.workload, exJoints: r.exJoints });
-// "How did it feel?" pops up once a muscle's last set in this workout is logged. Closing it leaves a
-// "Feedback needed" button under that muscle's last exercise to open it again.
+// Joint pain is asked as each exercise's sets are all done (in the order you finish them). The exercise
+// that finishes the muscle gets one sheet with its joint pain plus the muscle's pump and volume.
+// Closing a sheet leaves a "needed" button, and no other set logs until it's answered.
 const muscleFinished = (muscle) => { const all = W.exercises.filter((e) => e.muscle === muscle); return all.length && all.every(exDone) && all.some((e) => e.sets.some((q) => q.done)); };
-const trainedToday = (muscle, extra = null) => W.exercises.filter((e) => e.muscle === muscle && (e === extra || e.sets.some((q) => q.done)));
 // When a muscle's only set today is its first set too, soreness and the feedback come as one sheet.
 // Resolves { soreness, pump, workload, exJoints } or null if closed.
-const askBoth = (x) => feedbackSheet(x.muscle, trainedToday(x.muscle, x), { withSoreness: true });
+const askBoth = (x) => feedbackSheet(x.muscle, jointQs(x.muscle, x), { withSoreness: true });
+const fbOn = () => !!W && !W.isDeload && W.status !== 'skipped';
+const hasCheckin = (muscle) => !!W.checkins.find((c) => c.muscle === muscle);
+// when an exercise's sets were all done: its latest logged set
+const doneAt = (x) => Math.max(0, ...x.sets.filter((q) => q.done).map((q) => q.logged_at || 0));
+// an exercise whose sets are all done still owes its joint pain answer
+const jointOwed = (x) => fbOn() && exDone(x) && x.sets.some((q) => q.done) && x.joint_answer == null && !hasCheckin(x.muscle);
+// a muscle's unanswered joint questions, in the order those exercises were finished (extra: the one being logged now, last)
+const jointQs = (muscle, extra = null) => W.exercises.filter((e) => e.muscle === muscle && e !== extra && jointOwed(e))
+  .sort((a, b) => doneAt(a) - doneAt(b)).concat(extra && extra.joint_answer == null ? [extra] : []);
+// the feedback owed first (finished first): { muscle } for a finished muscle's sheet, { x } for one exercise's joint pain
+function owedFeedback() {
+  if (!fbOn() || W.status !== 'pending') return null;
+  const items = [];
+  for (const m of new Set(W.exercises.map((e) => e.muscle))) {
+    const mx = W.exercises.filter((e) => e.muscle === m);
+    if (muscleFinished(m)) { if (!hasCheckin(m)) items.push({ muscle: m, at: Math.max(...mx.map(doneAt)) }); } else for (const x of mx.filter(jointOwed)) items.push({ x, at: doneAt(x) });
+  }
+  items.sort((a, b) => a.at - b.at);
+  return items[0] || null;
+}
+// resolves true once answered
+const askOwed = (o) => (o.muscle ? openFeedback(o.muscle) : openJoint(o.x));
+// right after a set is logged: ask what that exercise (or its muscle) now owes
+function maybeAskFeedback(x) {
+  if (!x || !fbOn() || !exDone(x)) return;
+  if (muscleFinished(x.muscle)) { if (!hasCheckin(x.muscle)) openFeedback(x.muscle); } else if (jointOwed(x)) openJoint(x);
+}
 // would logging this set finish every set of its muscle today?
 const finishesMuscle = (x, s) => W.exercises.filter((e) => e.muscle === x.muscle).every((e) => e.sets.every((q) => q === s || !isOpenSet(q)));
 async function openFeedback(muscle) {
-  const r = await feedbackSheet(muscle, trainedToday(muscle));
-  if (!r) { draw(); return; }
-  try { await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(muscle, r)); toast('Feedback saved'); window.__jhKeepScroll = true; await reload(); } catch (err) { toast(err.message); }
+  const r = await feedbackSheet(muscle, jointQs(muscle));
+  if (!r) { draw(); return false; }
+  try {
+    const res = await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(muscle, r));
+    if (res && res.queued) { W.checkins.push({ muscle }); keepJoints(r.exJoints); draw(); return true; }
+    toast('Feedback saved'); window.__jhKeepScroll = true; await reload(); return true;
+  } catch (err) { toast(err.message); return false; }
 }
-function maybeAskCheckin(muscle) {
-  if (!W || W.isDeload || W.status === 'skipped' || !muscleFinished(muscle) || W.checkins.find((c) => c.muscle === muscle)) return;
-  openFeedback(muscle);
+async function openJoint(x) {
+  const r = await feedbackSheet(x.muscle, [x], { jointOnly: true });
+  if (!r) { draw(); return false; }
+  try {
+    const res = await api.queued('POST', `wex/${x.id}/action`, { action: 'jointAnswer', value: r.exJoints[x.id] });
+    if (res && res.queued) { keepJoints(r.exJoints); draw(); return true; }
+    window.__jhKeepScroll = true; await reload(); return true;
+  } catch (err) { toast(err.message); return false; }
 }
+// offline: remember the answers here until the phone syncs
+function keepJoints(exJoints) { for (const [id, v] of Object.entries(exJoints || {})) { const e = W.exercises.find((q) => q.id === Number(id)); if (e) e.joint_answer = v; } }
 
 // Asked as a pop-up when you log the first set for a muscle in this workout. Tapping away logs that
 // set, then a red "feedback is required" badge blocks the muscle's other sets until you answer.
@@ -321,6 +360,12 @@ async function logSetNow(id, values) {
   const reps = values.reps !== undefined ? values.reps : (s.reps ?? s.target_reps);
   if (reps == null) return editSet(id);
   if (x.model.kind !== 'none' && weight == null) return editSet(id);
+  // feedback owed for an exercise or muscle you finished blocks logging until it's answered
+  const fb = !s.done && owedFeedback();
+  if (fb) {
+    if (!(await askOwed(fb))) { toast('Answer the feedback first'); return; }
+    return logSetNow(id, values); // the answer reloaded the workout
+  }
   // an owed "feedback is required" answer (any muscle) blocks logging any other set until it's given
   const owed = Object.keys(W.soreness || {}).find((m) => feedbackDue(m));
   if (owed && !s.done) {
@@ -349,14 +394,14 @@ async function logSetNow(id, values) {
     W.lastSetAt = at; W.firstSetAt = W.firstSetAt || at; W.lastSet = { logged_at: at, rest: s.rest, wex_id: x.id };
     doneFold(x);
     if (feel) { try { await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(x.muscle, feel)); } catch (err) { toast(err.message); } }
-    draw(); if (!feel && !askedBoth) maybeAskCheckin(x.muscle); return;
+    draw(); if (!feel && !askedBoth) maybeAskFeedback(x); return;
   }
   afterLog(res);
   doneFold(x);
   if (feel) { try { await api.post(`workouts/${W.id}/checkin`, checkinBody(x.muscle, feel)); toast('Feedback saved'); } catch (err) { toast(err.message); } }
   window.__jhKeepScroll = true;
   await reload();
-  if (!feel && !askedBoth) maybeAskCheckin(x.muscle); // closed unanswered: the Feedback needed button stays
+  if (!feel && !askedBoth) maybeAskFeedback(W.exercises.find((e) => e.id === x.id)); // closed unanswered: the needed button stays
 }
 function stepFor(x) {
   const m = x.model;
@@ -521,11 +566,15 @@ function bindWorkout() {
       if (d.v && t.parentElement.dataset.k) { $$('button', t.parentElement).forEach((q) => q.classList.toggle('on', q === t)); return; }
       if (d.v && t.parentElement.dataset.sore) { await api.post(`checkins/${t.parentElement.dataset.sore}/soreness`, { value: d.v }); toast('Thanks. That steers next week\'s sets.'); await reload(); return; }
       if (d.fbneed) return openFeedback(d.fbneed);
+      if (d.fbjoint) { const fx = W.exercises.find((e) => e.id === Number(d.fbjoint)); if (fx) await openJoint(fx); return; }
     } catch (err) { toast(err.message); }
   };
 }
 
 async function finish() {
+  const fb = owedFeedback();
+  if (fb && !(await askOwed(fb))) { toast('Answer the feedback first'); return; }
+  if (owedFeedback()) return finish();
   try {
     await api.post(`workouts/${W.id}/action`, { action: 'finish' });
   } catch (e) {

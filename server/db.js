@@ -147,6 +147,11 @@ CREATE INDEX IF NOT EXISTS mesos_user ON mesos(user_id);
 CREATE INDEX IF NOT EXISTS notes_ref ON notes(user_id, scope, ref_id);
 `);
 
+// ---------- columns added after launch ----------
+const hasCol = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+// today's joint pain answer for one exercise (none | low | moderate | severe), asked once its sets are done
+if (!hasCol('wex', 'joint_answer')) db.exec('ALTER TABLE wex ADD COLUMN joint_answer TEXT');
+
 // ---------- built-in exercise library (from data/exercises.csv) ----------
 function parseCsvLine(l) {
   const out = []; let cur = ''; let q = false;
