@@ -669,11 +669,16 @@ function wexAction(user, id, b) {
       const sug = suggestFor(user, e, { rir: 2, excludeWorkout: x.workout_id });
       const model = E.loadModel(e.equipment, s);
       const w = sug && sug.confidence !== 'hint' ? sug.weight : null; const r = sug && sug.confidence !== 'hint' ? sug.reps : null;
-      db.prepare('UPDATE wex SET exercise_id=?, orig_exercise_id=?, suggestion=?, joint_pain=NULL WHERE id=?')
+      db.prepare('UPDATE wex SET exercise_id=?, orig_exercise_id=?, suggestion=?, joint_pain=NULL, joint_answer=NULL WHERE id=?')
         .run(e.id, b.scope === 'today' ? (x.orig_exercise_id || x.exercise_id) : null, sug ? JSON.stringify(cleanSug(sug)) : null, id);
       const range = w != null ? E.targetRange(w, model) : null;
       db.prepare('UPDATE sets SET target_weight=?, target_reps=?, range_low=?, range_high=?, weight=NULL WHERE wex_id=? AND done=0')
         .run(model.kind === 'none' ? null : w, r, range ? range[0] : null, range ? range[1] : null, id);
+    } else if (act === 'jointAnswer') {
+      if (!JOINT_ANSWERS.includes(b.value)) throw new Bad('Pick how your joints felt');
+      applyJoint(x, b.value);
+      // the muscle already checked in today: keep its worst joint answer current
+      db.prepare('UPDATE checkins SET joints=? WHERE workout_id=? AND muscle=?').run(muscleJoints(x.workout_id, x.muscle), x.workout_id, x.muscle);
     } else if (act === 'joint') {
       db.prepare('UPDATE wex SET joint_pain=? WHERE id=?').run(['some', 'painful'].includes(b.value) ? b.value : null, id);
     } else if (act === 'rest') {
@@ -719,6 +724,24 @@ function addExerciseToWorkout(user, workoutId, b) {
 const JOINT_LEVEL = { none: 'fine', fine: 'fine', low: 'some', some: 'some', moderate: 'painful', severe: 'painful', painful: 'painful' };
 const JOINT_RANK = { fine: 0, some: 1, painful: 2 };
 const jointLevel = (v) => (typeof v === 'string' && Object.hasOwn(JOINT_LEVEL, v) ? JOINT_LEVEL[v] : null);
+const JOINT_ANSWERS = ['none', 'low', 'moderate', 'severe'];
+// one exercise's answer today: kept as given, and mapped onto its joint_pain flag
+function applyJoint(x, answer) {
+  const lvl = jointLevel(answer); if (!lvl) return;
+  if (JOINT_ANSWERS.includes(answer)) db.prepare('UPDATE wex SET joint_answer=? WHERE id=?').run(answer, x.id);
+  // no pain today clears today's own answer, but leaves a flag carried over from last week
+  if (lvl === 'fine') { if (x.joint_pain === 'some' || x.joint_pain === 'painful') db.prepare('UPDATE wex SET joint_pain=NULL WHERE id=?').run(x.id); return; }
+  if (lvl === 'some' && x.joint_pain && x.joint_pain !== 'some') return; // don't downgrade a flag
+  db.prepare('UPDATE wex SET joint_pain=? WHERE id=?').run(lvl, x.id);
+}
+// the muscle's check-in keeps the worst joint answer of its exercises today
+function muscleJoints(workoutId, muscle) {
+  let joints = null;
+  for (const r of db.prepare('SELECT joint_answer FROM wex WHERE workout_id=? AND muscle=? AND removed=0 AND joint_answer IS NOT NULL').all(workoutId, muscle)) {
+    const lvl = jointLevel(r.joint_answer); if (lvl && (joints == null || JOINT_RANK[lvl] > JOINT_RANK[joints])) joints = lvl;
+  }
+  return joints;
+}
 function checkin(user, workoutId, b) {
   const w = workoutOf(user, workoutId);
   const muscle = MUSCLES.includes(b.muscle) ? b.muscle : null; if (!muscle) throw new Bad('Unknown muscle');
@@ -729,7 +752,7 @@ function checkin(user, workoutId, b) {
     for (const [k, v] of Object.entries(b.exJoints)) {
       const lvl = jointLevel(v); if (!lvl) continue;
       const x = db.prepare('SELECT id, joint_pain FROM wex WHERE id=? AND workout_id=? AND muscle=? AND removed=0').get(Number(k), w.id, muscle);
-      if (x) per.push({ x, lvl });
+      if (x) per.push({ x, lvl, v });
     }
   }
   let joints = jointLevel(b.joints);
@@ -739,12 +762,13 @@ function checkin(user, workoutId, b) {
       ON CONFLICT(workout_id,muscle) DO UPDATE SET pump=excluded.pump, workload=excluded.workload, joints=excluded.joints`)
       .run(w.id, muscle, pick(b.pump, ['low', 'good', 'great']), pick(b.workload, ['easy', 'right', 'pushed', 'too_much']), joints, now());
     if (per.length) {
-      for (const { x, lvl } of per) {
-        // no pain today clears today's own answer, but leaves a flag carried over from last week
-        if (lvl === 'fine') { if (x.joint_pain === 'some' || x.joint_pain === 'painful') db.prepare('UPDATE wex SET joint_pain=NULL WHERE id=?').run(x.id); continue; }
-        if (lvl === 'some' && x.joint_pain && x.joint_pain !== 'some') continue; // don't downgrade a flag
-        db.prepare('UPDATE wex SET joint_pain=? WHERE id=?').run(lvl, x.id);
-      }
+      for (const { x, v } of per) applyJoint(x, v);
+      // answers given earlier today (after each exercise) count toward the muscle too
+      const all = muscleJoints(w.id, muscle);
+      if (all != null && (joints == null || JOINT_RANK[all] > JOINT_RANK[joints])) db.prepare('UPDATE checkins SET joints=? WHERE workout_id=? AND muscle=?').run(all, w.id, muscle);
+    } else if (b.joints == null && b.exJoints && typeof b.exJoints === 'object' && !Object.keys(b.exJoints).length && muscleJoints(w.id, muscle) != null) {
+      // every exercise was answered as it finished: the muscle keeps the worst of those
+      db.prepare('UPDATE checkins SET joints=? WHERE workout_id=? AND muscle=?').run(muscleJoints(w.id, muscle), w.id, muscle);
     } else if (joints === 'painful' || joints === 'some') {
       db.prepare('UPDATE wex SET joint_pain=? WHERE workout_id=? AND muscle=? AND joint_pain IS NULL').run(joints, w.id, muscle);
     }
