@@ -97,7 +97,8 @@ export function sheet(html, { onMount, onClose } = {}) {
   const el = document.createElement('div'); el.className = 'sheet'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
   el.innerHTML = `<div class="grab"></div>${html}`;
   root.append(bd, el);
-  const close = () => { bd.remove(); el.remove(); sheetStack = sheetStack.filter((s) => s !== api2); if (onClose) onClose(); };
+  // a sheet whose answer is saving (el.dataset.busy) can't be closed until it's done
+  const close = (force) => { if (el.dataset.busy && force !== true) return; bd.remove(); el.remove(); sheetStack = sheetStack.filter((s) => s !== api2); if (onClose) onClose(); };
   const api2 = { el, close };
   sheetStack.push(api2);
   bd.addEventListener('click', close);
@@ -105,7 +106,7 @@ export function sheet(html, { onMount, onClose } = {}) {
   const f = el.querySelector('[autofocus]'); if (f) setTimeout(() => f.focus(), 50);
   return api2;
 }
-export const closeSheets = () => { for (const s of [...sheetStack]) s.close(); };
+export const closeSheets = () => { for (const s of [...sheetStack]) s.close(true); };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheetStack.length) sheetStack[sheetStack.length - 1].close(); });
 // A menu sheet: items [{ label, sub, danger, group, run }]
 // An item can carry info: { title, html } to show an (i) button that explains it without picking it.
