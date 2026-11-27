@@ -349,9 +349,14 @@ async function logSet(id, values) {
   logging.add(id);
   try {
     if (inlineOpen) inlineOpen(true); // phones may not close the box when a button is tapped
-    if (inlineSaving && !(await inlineSaving)) return; // the save failed and said why; nothing is logged
+    if (inlineSaving) { savingLook(id, true); if (!(await inlineSaving)) return; } // the save failed and said why; nothing is logged
     return await logSetNow(id, values);
-  } finally { logging.delete(id); }
+  } finally { logging.delete(id); savingLook(id, false); }
+}
+// while a set saves, a light runs around its Log button (the page redraws it as logged when done)
+function savingLook(id, on) {
+  const b = document.querySelector(`.log[data-log="${id}"]`);
+  if (b) { b.classList.toggle('saving', on); b.setAttribute('aria-busy', on ? 'true' : 'false'); }
 }
 async function logSetNow(id, values) {
   const { x, s } = findSet(id);
@@ -387,6 +392,7 @@ async function logSetNow(id, values) {
     if (!answered && muscleStarted(x.muscle)) { draw(); return; }
   }
   const at = Date.now();
+  savingLook(id, true);
   const res = await api.queued('PUT', `sets/${id}`, { weight: x.model.kind === 'none' ? null : weight, reps, done: true, at });
   if (res.queued) {
     // apply here so the phone keeps working without signal
