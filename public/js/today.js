@@ -178,7 +178,8 @@ const FB_HELP = {
   volume: ['Volume', '<p>How the number of hard sets for this muscle felt today.</p><p><b>Not enough</b> or <b>just right</b> with a low pump adds a set next week. <b>Pushed my limits</b> holds steady (or trims a set without a great pump). <b>Too much</b> takes a set away.</p>'],
   sore: ['Soreness', '<p>How the muscle recovered since you last trained it.</p><p><b>Still sore</b> means it needs more recovery, so sets won\'t be added next week.</p>'],
 };
-function feedbackSheet(muscle, exercises, { withSoreness = false, jointOnly = false } = {}) {
+// onSave(answers) runs with the sheet still open (light on Save, no closing); it closes once that returns true
+function feedbackSheet(muscle, exercises, { withSoreness = false, jointOnly = false, onSave = null } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const m = esc(muscle.toLowerCase());
@@ -208,9 +209,12 @@ function feedbackSheet(muscle, exercises, { withSoreness = false, jointOnly = fa
           if (b.dataset.fbx !== undefined || b.dataset.fbcancel !== undefined) { close(); return; }
           if (b.dataset.fbsave !== undefined) {
             if (!keys.every((k) => val(k))) return;
-            done = true; close();
-            resolve({ soreness: withSoreness ? val('sore') : undefined, pump: val('pump'), workload: val('workload'),
-              exJoints: Object.fromEntries(exercises.map((x) => [x.id, val(`j${x.id}`)])) });
+            const r = { soreness: withSoreness ? val('sore') : undefined, pump: val('pump'), workload: val('workload'),
+              exJoints: Object.fromEntries(exercises.map((x) => [x.id, val(`j${x.id}`)])) };
+            (async () => {
+              if (onSave && !(await saveInSheet(el, b, () => onSave(r)))) return; // failed: stays open with your answers
+              done = true; close(); resolve(r);
+            })();
           }
         });
       },
@@ -225,7 +229,19 @@ const checkinBody = (muscle, r) => ({ muscle, pump: r.pump, workload: r.workload
 const muscleFinished = (muscle) => { const all = W.exercises.filter((e) => e.muscle === muscle); return all.length && all.every(exDone) && all.some((e) => e.sets.some((q) => q.done)); };
 // When a muscle's only set today is its first set too, soreness and the feedback come as one sheet.
 // Resolves { soreness, pump, workload, exJoints } or null if closed.
-const askBoth = (x) => feedbackSheet(x.muscle, jointQs(x.muscle, x), { withSoreness: true });
+const askBoth = (x, sore) => feedbackSheet(x.muscle, jointQs(x.muscle, x), { withSoreness: true, onSave: async (r) => {
+  await api.queued('POST', `checkins/${sore.checkinId}/soreness`, { value: r.soreness }); W.soreness[x.muscle].answer = r.soreness;
+  await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(x.muscle, r)); W.checkins.push({ muscle: x.muscle }); keepJoints(r.exJoints);
+  return true;
+} });
+// keep a sheet open while its answer saves: the light runs on the tapped button and nothing in it can be
+// tapped or closed. Resolves true once saved; on an error it shows it and the sheet stays open.
+async function saveInSheet(el, btn, work) {
+  el.dataset.busy = '1'; el.classList.add('busy'); btn.classList.add('saving'); btn.setAttribute('aria-busy', 'true');
+  try { return !!(await work()); } catch (e) { toast(e.message); return false; } finally {
+    delete el.dataset.busy; el.classList.remove('busy'); btn.classList.remove('saving'); btn.removeAttribute('aria-busy');
+  }
+}
 const fbOn = () => !!W && !W.isDeload && W.status !== 'skipped';
 const hasCheckin = (muscle) => !!W.checkins.find((c) => c.muscle === muscle);
 // when an exercise's sets were all done: its latest logged set
@@ -256,22 +272,22 @@ function maybeAskFeedback(x) {
 // would logging this set finish every set of its muscle today?
 const finishesMuscle = (x, s) => W.exercises.filter((e) => e.muscle === x.muscle).every((e) => e.sets.every((q) => q === s || !isOpenSet(q)));
 async function openFeedback(muscle) {
-  const r = await feedbackSheet(muscle, jointQs(muscle));
-  if (!r) { draw(); return false; }
-  try {
-    const res = await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(muscle, r));
-    if (res && res.queued) { W.checkins.push({ muscle }); keepJoints(r.exJoints); draw(); return true; }
+  const r = await feedbackSheet(muscle, jointQs(muscle), { onSave: async (a) => {
+    const res = await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(muscle, a));
+    if (res && res.queued) { W.checkins.push({ muscle }); keepJoints(a.exJoints); draw(); return true; }
     toast('Feedback saved'); window.__jhKeepScroll = true; await reload(); return true;
-  } catch (err) { toast(err.message); return false; }
+  } });
+  if (!r) { draw(); return false; }
+  return true;
 }
 async function openJoint(x) {
-  const r = await feedbackSheet(x.muscle, [x], { jointOnly: true });
-  if (!r) { draw(); return false; }
-  try {
-    const res = await api.queued('POST', `wex/${x.id}/action`, { action: 'jointAnswer', value: r.exJoints[x.id] });
-    if (res && res.queued) { keepJoints(r.exJoints); draw(); return true; }
+  const r = await feedbackSheet(x.muscle, [x], { jointOnly: true, onSave: async (a) => {
+    const res = await api.queued('POST', `wex/${x.id}/action`, { action: 'jointAnswer', value: a.exJoints[x.id] });
+    if (res && res.queued) { keepJoints(a.exJoints); draw(); return true; }
     window.__jhKeepScroll = true; await reload(); return true;
-  } catch (err) { toast(err.message); return false; }
+  } });
+  if (!r) { draw(); return false; }
+  return true;
 }
 // offline: remember the answers here until the phone syncs
 function keepJoints(exJoints) { for (const [id, v] of Object.entries(exJoints || {})) { const e = W.exercises.find((q) => q.id === Number(id)); if (e) e.joint_answer = v; } }
@@ -286,10 +302,10 @@ function askSoreness(muscle, checkinId) {
       <div class="menu">${[['never', 'Never got sore'], ['early', 'Healed a while ago'], ['on_time', 'Healed just in time'], ['sore', 'Still sore']].map(([v, l]) => `<button data-sv="${v}"><span>${l}</span>${W.soreness[muscle] && W.soreness[muscle].answer === v ? '<small>current</small>' : ''}</button>`).join('')}</div>`, {
       onMount: (el, close) => el.addEventListener('click', async (e) => {
         const b = e.target.closest('[data-sv]'); if (!b) return;
-        if (b.dataset.sv) {
-          picked = true; close();
-          try { await api.queued('POST', `checkins/${checkinId}/soreness`, { value: b.dataset.sv }); if (W.soreness[muscle]) W.soreness[muscle].answer = b.dataset.sv; } catch (err) { toast(err.message); }
-          resolve(true);
+        if (b.dataset.sv && !el.dataset.busy) {
+          const ok = await saveInSheet(el, b, async () => { await api.queued('POST', `checkins/${checkinId}/soreness`, { value: b.dataset.sv }); if (W.soreness[muscle]) W.soreness[muscle].answer = b.dataset.sv; return true; });
+          if (!ok) return; // failed: stays open to try again
+          picked = true; close(); resolve(true);
         }
       }),
       onClose: () => { if (!picked) resolve(false); }, // closing without an answer doesn't log the set
@@ -381,11 +397,7 @@ async function logSetNow(id, values) {
   let feel = null; let askedBoth = false;
   if (sore && !s.done && !muscleStarted(x.muscle) && finishesMuscle(x, s) && !W.isDeload && !W.checkins.find((c) => c.muscle === x.muscle)) {
     askedBoth = true;
-    const r = await askBoth(x);
-    if (r) {
-      try { await api.queued('POST', `checkins/${sore.checkinId}/soreness`, { value: r.soreness }); W.soreness[x.muscle].answer = r.soreness; } catch (err) { toast(err.message); }
-      feel = r;
-    } // tapping away still logs the set; the questions stay on the card and badge
+    feel = await askBoth(x, sore); // saved before closing; tapping away still logs the set and the questions stay owed
   } else if (sore) {
     const answered = await askSoreness(x.muscle, sore.checkinId);
     // tapping away still logs the muscle's first set; after that the answer is required
@@ -399,12 +411,10 @@ async function logSetNow(id, values) {
     Object.assign(s, { weight, reps, done: 1, skipped: 0, logged_at: at });
     W.lastSetAt = at; W.firstSetAt = W.firstSetAt || at; W.lastSet = { logged_at: at, rest: s.rest, wex_id: x.id };
     doneFold(x);
-    if (feel) { try { await api.queued('POST', `workouts/${W.id}/checkin`, checkinBody(x.muscle, feel)); } catch (err) { toast(err.message); } }
     draw(); if (!feel && !askedBoth) maybeAskFeedback(x); return;
   }
   afterLog(res);
   doneFold(x);
-  if (feel) { try { await api.post(`workouts/${W.id}/checkin`, checkinBody(x.muscle, feel)); toast('Feedback saved'); } catch (err) { toast(err.message); } }
   window.__jhKeepScroll = true;
   await reload();
   if (!feel && !askedBoth) maybeAskFeedback(W.exercises.find((e) => e.id === x.id)); // closed unanswered: the needed button stays
@@ -470,14 +480,19 @@ function editSet(id, field = null) {
       el.querySelector('[data-save]').onclick = async () => {
         const v = vals();
         if (field === 'r' && s.done && (v.reps == null || (v.reps < 1 && s.kind !== 'attempt'))) { toast('Enter the reps'); return; }
-        close(); try { await api.queued('PUT', `sets/${id}`, v); await reload(); } catch (e) { toast(e.message); }
+        if (await saveInSheet(el, el.querySelector('[data-save]'), async () => { await api.queued('PUT', `sets/${id}`, v); await reload(); return true; })) close();
       };
       const lg = el.querySelector('[data-logit]');
       if (lg) lg.onclick = async () => {
         const v = vals(true);
         if (v.reps == null || (v.reps < 1 && s.kind !== 'attempt')) { toast('Enter the reps'); return; }
-        close();
-        try { if (s.done) { await api.put(`sets/${id}`, v); await reload(); } else await logSet(id, v); } catch (e) { toast(e.message); }
+        // stays open (light on the button) until the set is saved; pop-ups it needs come up on top
+        const ok = await saveInSheet(el, lg, async () => {
+          if (s.done) { await api.put(`sets/${id}`, v); await reload(); return true; }
+          await logSet(id, v);
+          return !!findSet(id).s?.done;
+        });
+        if (ok) close();
       };
     },
   });
