@@ -300,8 +300,23 @@ function tickTimer() {
 // ---------- actions ----------
 function findSet(id) { for (const x of W.exercises) { const s = x.sets.find((q) => q.id === id); if (s) return { x, s }; } return {}; }
 function afterLog(res) { if (res && res.pr) celebrate(res.pr); }
+// A number typed in a set row is still saving when Log is tapped (tapping Log is what closes the box),
+// so Log waits for that save and then logs with it. Extra taps on a set that is already logging are ignored.
+let inlineOpen = null; // finish() of the box open in a set row, if any
+let inlineSaving = null; // promise of a row save in flight: true when it worked
+const logging = new Set();
 async function logSet(id, values) {
+  if (logging.has(id)) return;
+  logging.add(id);
+  try {
+    if (inlineOpen) inlineOpen(true); // phones may not close the box when a button is tapped
+    if (inlineSaving && !(await inlineSaving)) return; // the save failed and said why; nothing is logged
+    return await logSetNow(id, values);
+  } finally { logging.delete(id); }
+}
+async function logSetNow(id, values) {
   const { x, s } = findSet(id);
+  if (!s) return;
   const weight = values.weight !== undefined ? values.weight : (s.weight ?? s.target_weight);
   const reps = values.reps !== undefined ? values.reps : (s.reps ?? s.target_reps);
   if (reps == null) return editSet(id);
@@ -438,26 +453,35 @@ function inlineEdit(btn, id, field) {
   cell.replaceWith(inp);
   inp.focus(); inp.select();
   let finished = false;
-  const finish = async (save) => {
+  const finish = (save) => {
     if (finished) return; finished = true;
+    if (inlineOpen === finish) inlineOpen = null;
+    const p = save$(save);
+    inlineSaving = p;
+    p.finally(() => { if (inlineSaving === p) inlineSaving = null; });
+    return p;
+  };
+  inlineOpen = finish;
+  // resolves true when there was nothing to save or it saved (or was queued offline), false when it didn't
+  const save$ = async (save) => {
     const raw = inp.value.trim().replace(',', '.');
     window.__jhKeepScroll = true;
     // clearing your own reps on an unlogged set brings the recommended target back
     if (save && raw === '' && field === 'r' && !s.done && s.reps != null) {
-      try { const res = await api.queued('PUT', `sets/${id}`, { reps: null }); if (res && res.queued) { s.reps = null; draw(); return; } window.__jhKeepScroll = true; await reload(); } catch (e) { toast(e.message); draw(); }
-      return;
+      try { const res = await api.queued('PUT', `sets/${id}`, { reps: null }); if (res && res.queued) { s.reps = null; draw(); return true; } window.__jhKeepScroll = true; await reload(); return true; } catch (e) { toast(e.message); draw(); return false; }
     }
-    if (!save || raw === '' || raw === (cur == null ? '' : field === 'w' ? fmtW(cur) : String(cur))) { draw(); return; }
+    if (!save || raw === '' || raw === (cur == null ? '' : field === 'w' ? fmtW(cur) : String(cur))) { draw(); return true; }
     const v = Number(raw);
-    if (!isFinite(v) || v < 0) { toast(field === 'w' ? 'Check the weight' : 'Check the reps'); draw(); return; }
+    if (!isFinite(v) || v < 0) { toast(field === 'w' ? 'Check the weight' : 'Check the reps'); draw(); return false; }
     const body = field === 'w' ? { weight: v } : { reps: Math.round(v) };
-    if (field === 'r' && s.done && body.reps < 1 && s.kind !== 'attempt') { toast('Enter the reps'); draw(); return; }
+    if (field === 'r' && s.done && body.reps < 1 && s.kind !== 'attempt') { toast('Enter the reps'); draw(); return false; }
     try {
       const res = await api.queued('PUT', `sets/${id}`, body);
-      if (res && res.queued) { Object.assign(s, body); draw(); return; }
+      if (res && res.queued) { Object.assign(s, body); draw(); return true; }
       window.__jhKeepScroll = true;
       await reload();
-    } catch (e) { toast(e.message); draw(); }
+      return true;
+    } catch (e) { toast(e.message); draw(); return false; }
   };
   inp.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
